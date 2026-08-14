@@ -1,0 +1,151 @@
+package cn.bugstack.export.example.composable;
+
+import cn.bugstack.export.definition.AbstractReportDefinition;
+import cn.bugstack.export.definition.ModuleSlot;
+import cn.bugstack.export.definition.ReportBlueprint;
+import cn.bugstack.export.definition.ReportLayout;
+import cn.bugstack.export.definition.ReportStyleProfile;
+import cn.bugstack.export.example.composable.model.ComparisonAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.AssessmentCalculationAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.FunctionalOptimizationAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.ImpactAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.AssessmentScenarioConstructionModuleData;
+import cn.bugstack.export.example.composable.model.VulnerabilityAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.CombatProcessAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.ContributionRateAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.ComposableReportCoverModel;
+import cn.bugstack.export.example.composable.module.ComparisonAnalysisReportModule;
+import cn.bugstack.export.example.composable.module.AssessmentCalculationAnalysisReportModule;
+import cn.bugstack.export.example.composable.module.FunctionalOptimizationAnalysisReportModule;
+import cn.bugstack.export.example.composable.module.ImpactAnalysisReportModule;
+import cn.bugstack.export.example.composable.module.AssessmentScenarioConstructionReportModule;
+import cn.bugstack.export.example.composable.module.VulnerabilityAnalysisReportModule;
+import cn.bugstack.export.example.composable.module.CombatProcessAnalysisReportModule;
+import cn.bugstack.export.example.composable.module.ContributionRateAnalysisReportModule;
+import cn.bugstack.export.module.ReportDataContext;
+
+/**
+ * 根据业务入参动态选择模块的报告定义。
+ */
+public final class ComposableTextReportDefinition extends AbstractReportDefinition<ComposableReportInput> {
+
+    /** 创建可组合文本报告定义。 */
+    public ComposableTextReportDefinition() {
+        super("composable-text-report", "评估报告", "1.0");
+    }
+
+    /**
+     * 只把入参选择的模块加入蓝图，选择顺序即 Word 章节顺序。
+     *
+     * @param builder 报告蓝图构建器
+     * @param input 可组合报告入参
+     */
+    @Override
+    protected void configure(ReportBlueprint.Builder builder, ComposableReportInput input) {
+        requireInput(input);
+        String pageNumberFooter = input.getModuleModel()
+                .getPageNumberFooterFormat().getTemplate();
+        ReportLayout.Builder layout = ReportLayout.builder()
+                .styleProfile(ReportStyleProfile.GJB_438C)
+                .headingNumberingEnabled(true)
+                .bodyTitle(false)
+                .tableOfContents(3)
+                .tableOfContentsFooter(pageNumberFooter)
+                .footer(pageNumberFooter)
+                .modulePageNumberStart(1);
+        if (input.getCoverModel() instanceof ComposableReportCoverModel) {
+            ComposableReportCoverModel standardCover =
+                    (ComposableReportCoverModel) input.getCoverModel();
+            layout.cover(standardCover.getDocumentName(),
+                    standardCover.getProjectName(), standardCover.getVersion());
+        } else {
+            layout.coverTemplate(input.getCoverModel());
+        }
+        if (hasText(input.getModuleModel().getHeaderText())) {
+            layout.header(input.getModuleModel().getHeaderText());
+        }
+        builder.title(input.getCoverModel().getDocumentName())
+                .metadata(input.getPreparedBy(), "综合评估分析结果")
+                .layout(layout.build());
+        for (ComposableReportModule module : input.getModuleModel().getSelectedModules()) {
+            builder.module(ModuleSlot.builder(module.getCode()).build());
+        }
+    }
+
+    /**
+     * 只为已选择模块装配纯文本数据。
+     *
+     * @param context 报告数据上下文
+     * @param input 可组合报告入参
+     */
+    @Override
+    public void contributeData(ReportDataContext context, ComposableReportInput input) {
+        requireInput(input);
+        for (ComposableReportModule module : input.getModuleModel().getSelectedModules()) {
+            contributeModuleData(context, input, module);
+        }
+    }
+
+    /**
+     * 将八种不同类型的业务对象写入各自模块的数据键。
+     *
+     * @param context 报告数据上下文
+     * @param input 报告入参
+     * @param module 当前模块类型
+     */
+    private void contributeModuleData(ReportDataContext context, ComposableReportInput input,
+                                      ComposableReportModule module) {
+        switch (module) {
+            case ASSESSMENT_SCENARIO_CONSTRUCTION:
+                context.put(AssessmentScenarioConstructionReportModule.DATA_KEY,
+                        input.getModuleModel().requireModuleData(module, AssessmentScenarioConstructionModuleData.class));
+                break;
+            case ASSESSMENT_CALCULATION_ANALYSIS:
+                context.put(AssessmentCalculationAnalysisReportModule.DATA_KEY,
+                        input.getModuleModel().requireModuleData(module, AssessmentCalculationAnalysisModuleData.class));
+                break;
+            case CONTRIBUTION_RATE_ANALYSIS:
+                context.put(ContributionRateAnalysisReportModule.DATA_KEY,
+                        input.getModuleModel().requireModuleData(module, ContributionRateAnalysisModuleData.class));
+                break;
+            case IMPACT_ANALYSIS:
+                context.put(ImpactAnalysisReportModule.DATA_KEY,
+                        input.getModuleModel().requireModuleData(module, ImpactAnalysisModuleData.class));
+                break;
+            case COMPARISON_ANALYSIS:
+                context.put(ComparisonAnalysisReportModule.DATA_KEY,
+                        input.getModuleModel().requireModuleData(module, ComparisonAnalysisModuleData.class));
+                break;
+            case COMBAT_PROCESS_ANALYSIS:
+                context.put(CombatProcessAnalysisReportModule.DATA_KEY,
+                        input.getModuleModel().requireModuleData(module, CombatProcessAnalysisModuleData.class));
+                break;
+            case VULNERABILITY_ANALYSIS:
+                context.put(VulnerabilityAnalysisReportModule.DATA_KEY,
+                        input.getModuleModel().requireModuleData(module, VulnerabilityAnalysisModuleData.class));
+                break;
+            case FUNCTIONAL_OPTIMIZATION_ANALYSIS:
+                context.put(FunctionalOptimizationAnalysisReportModule.DATA_KEY,
+                        input.getModuleModel().requireModuleData(module, FunctionalOptimizationAnalysisModuleData.class));
+                break;
+            default:
+                throw new IllegalArgumentException("unsupported report module: " + module);
+        }
+    }
+
+    /**
+     * 校验报告入参。
+     *
+     * @param input 待校验入参
+     */
+    private void requireInput(ComposableReportInput input) {
+        if (input == null) {
+            throw new IllegalArgumentException("composable report input must not be null");
+        }
+    }
+
+    /** 判断可选文本是否包含有效内容。 */
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+}
