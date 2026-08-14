@@ -7,6 +7,7 @@ Omni Office 是一个面向 Java 应用的 Office 文档生成与报告编排项
 ## 核心特性
 
 - 使用强类型业务对象实现报告模块，不需要把所有模块数据硬编码为 `String`。
+- 提供可组合报告定义、对象型文本模块和类型化导出门面的公共父类。
 - 八个评估分析模块可任意选择、排序和组合。
 - 支持默认封面和实现 `ReportCoverTemplate` 的动态封面。
 - 内置“文档修改记录”表格封面模板，支持动态记录和空白填写行。
@@ -14,6 +15,7 @@ Omni Office 是一个面向 Java 应用的 Office 文档生成与报告编排项
 - 目录页使用大写罗马数字 `I、II、III...`，业务正文重新从阿拉伯数字 `1` 开始。
 - 页脚默认仅显示页码，也可选择“第 N 页”格式。
 - 业务正文页眉可选，不设置时不会创建页眉。
+- 支持业务实现公开的 `StyleProfile` 接口，自定义整套字体、字号、行距、段距和表格样式。
 - 支持 Word 原生多级标题编号、目录域、页码域、题注和交叉引用。
 - 支持段落、列表、表格、图片、Visio 预览、分页和类设计表格。
 - 支持 DOCX 和 PDF 输出，并使用临时文件保证文件导出的原子性。
@@ -37,6 +39,7 @@ Omni Office 是一个面向 Java 应用的 Office 文档生成与报告编排项
 src/main/java/cn/bugstack
 ├── export
 │   ├── api                 # 导出请求、结果、格式和异常
+│   ├── composable          # 可组合报告配置契约与定义父类
 │   ├── core                # 导出生命周期、计划、校验和编排
 │   ├── definition          # 报告蓝图、布局、模块槽位和封面模板协议
 │   ├── document            # 与 Word 实现无关的报告语义模型
@@ -71,23 +74,30 @@ flowchart LR
 
 这种边界让业务模块可以被独立测试，也让后续增加 HTML 或其他输出格式时不必重写业务组装逻辑。
 
-### 2. 模块采用注册表和策略模式
+### 2. 定义、模块和导出职责分离
+
+`AbstractComposableReportDefinition<I>` 统一处理封面、目录、页眉页脚和动态模块顺序，具体报告
+仍通过 `contributeData(...)` 装配模块数据。`AbstractTextReportModule<T>` 只简化“从业务对象取出
+一段文本”的模块，复杂模块仍直接继承 `AbstractReportModule<T>`。`AbstractReportExportFacade<I>`
+负责固定报告定义和模块注册表，定义对象本身不承担导出职责。
+
+### 3. 模块采用注册表和策略模式
 
 每个报告模块都是独立的 `AbstractReportModule<T>` 实现，并拥有自己的数据类型、数据键、模块编码和章节标题。`ReportModuleRegistry` 负责注册与查找模块，`ReportPlanner` 按蓝图顺序解析依赖、条件和最终执行计划。
 
 模块是否导出由入参决定，调用方添加模块的顺序就是最终 Word 章节顺序。重复模块和空模块组合会在构建阶段被拒绝。
 
-### 3. 文档内部使用 Composite + Builder
+### 4. 文档内部使用 Composite + Builder
 
 `DocumentNode`、`SectionNode`、`ParagraphNode`、`TableNode` 和各种 Inline 节点构成内部组件树。调用方使用 `DocxDocument`、`SectionBuilder`、`TableBuilder` 等 Builder 创建内容，渲染器统一处理节点遍历、游标位置和样式恢复。
 
-### 4. 封面使用可插拔模板
+### 5. 封面使用可插拔模板
 
 `ReportCoverTemplate` 返回与目标格式无关的有序语义元素。默认封面继续使用标准文档名称、项目名称和版本布局；调用方也可以替换为表格、段落或自定义组合。
 
 动态封面位于目录之前，并拥有独立 Section。模板内容不会自动加入目录，也不会被正文标题编号影响。
 
-### 5. 分节和页码独立控制
+### 6. 分节和页码独立控制
 
 可组合报告的默认结构为：
 
@@ -99,7 +109,7 @@ Section 3：业务模块，可选页眉，页码重新从 1 开始
 
 目录和正文页脚会断开“链接到前一节”。正文内部后续增加 Section 时只在第一个正文 Section 重启页码，避免每个章节都重新回到 1。
 
-### 6. 可扩展编译边界
+### 7. 可扩展编译边界
 
 内置编译器支持常用语义元素。业务如果新增自定义 `ReportElement`，可以注册 `ReportElementCompiler<E>`，而不需要修改所有报告模块或直接侵入 Aspose 渲染器。
 
@@ -139,6 +149,45 @@ java -Daspose.words.license.path=/absolute/path/Aspose.Words.Java.lic ...
 
 ## 快速开始
 
+### 使用可组合报告
+
+先按最终章节顺序组装对象型模块数据，再交给独立的导出门面：
+
+```java
+ComposableReportModuleModel modules = ComposableReportModuleModel.builder()
+        .module(new AssessmentScenarioConstructionModuleData("评估场景构设正文。"))
+        .module(new ImpactAnalysisModuleData("影响分析正文。"))
+        .build();
+
+ComposableReportInput input = ComposableReportInput.builder(modules)
+        .preparedBy("评估分析组")
+        .build();
+
+ComposableTextReportExporter exporter = new ComposableTextReportExporter();
+exporter.export(input, Path.of("target", "assessment-report.docx"));
+
+// HTTP 下载场景
+byte[] content = exporter.exportToBytes(input);
+```
+
+`ComposableReportInput` 实现公共的 `ComposableReportConfiguration`；
+`ComposableTextReportDefinition` 继承公共定义父类，仅保留 `contributeData(...)`；
+`ComposableTextReportExporter` 继承公共导出门面并注册当前报告支持的 8 个模块。
+
+未显式设置的报告内容会使用以下默认值：
+
+| 配置 | 默认值 |
+| --- | --- |
+| 封面 | 报告名称、报告名称、蓝图版本组成的标准封面 |
+| 样式 | 八模块示例使用 `ReportStyleProfile.GJB_438C` |
+| 目录 | 启用，收录 1～3 级标题 |
+| 页眉 | 不生成 |
+| 目录页脚 | 仅显示大写罗马数字页码，从 `I` 开始 |
+| 正文页脚 | 仅显示阿拉伯数字页码，从 `1` 开始 |
+| 正文大标题 | 默认不重复输出 |
+| 标题编号 | 默认启用 |
+| 基础信息表格 | 默认不生成 |
+
 ### 编译与测试
 
 ```bash
@@ -176,10 +225,7 @@ new ComposableTextReportExporter().export(
 
 ```java
 ComposableReportCoverModel cover = new ComposableReportCoverModel(
-        "评估分析报告",
-        "联合任务方案",
-        "V1.0");
-
+        "评估分析报告", "联合任务方案", "V1.0");
 ComposableReportModuleModel modules = ComposableReportModuleModel.builder()
         .header("评估分析报告")
         .module(new ImpactAnalysisModuleData("影响分析正文。"))
@@ -201,6 +247,10 @@ DocumentModificationRecordCoverTemplate cover =
                 .record("张三", "2026-08-13 10:30")
                 .record("李四", "2026-08-14 09:00")
                 .build();
+
+ComposableReportModuleModel modules = ComposableReportModuleModel.builder()
+        .module(new ImpactAnalysisModuleData("影响分析正文。"))
+        .build();
 
 ComposableReportInput input = ComposableReportInput.builder(cover, modules)
         .preparedBy("评估分析组")
@@ -239,6 +289,77 @@ ComposableReportModuleModel modules = ComposableReportModuleModel.builder()
 - `PAGE_ONLY`：仅显示 `I` 或 `1`，这是默认值。
 - `CHINESE_DECORATED`：显示“第 I 页”或“第 1 页”。
 
+### 不修改框架自定义样式
+
+内置样式仍可直接使用：
+
+```java
+.styleProfile(ReportStyleProfile.GJB_438C)
+```
+
+业务自定义样式不需要向 `ReportStyleProfile` 枚举增加常量，也不需要修改
+`DocxReportCompiler`。只需在业务包实现公开的 `StyleProfile` 接口：
+
+```java
+public final class BusinessReportStyleProfile implements StyleProfile {
+
+    @Override
+    public StyleRegistry createRegistry() {
+        // 复用完整默认样式，避免遗漏 Title、Heading1～Heading9 等必要样式。
+        StyleRegistry registry = DefaultStyles.createRegistry();
+
+        ParagraphStyle title = registry.getParagraphStyle("Title");
+        title.setFarEastFontFamily("微软雅黑");
+        title.setAsciiFontFamily("Arial");
+        title.setFontSize(24.0);
+        title.setBold(true);
+        title.setAlignment(DocxParagraphAlignment.CENTER);
+        registry.registerParagraphStyle(title);
+
+        ParagraphStyle body = registry.getParagraphStyle("BodyText");
+        body.setFarEastFontFamily("宋体");
+        body.setAsciiFontFamily("Times New Roman");
+        body.setFontSize(12.0);
+        body.setCharacterUnitFirstLineIndent(2.0);
+        body.setLineSpacingRule(DocxLineSpacingRule.MULTIPLE);
+        body.setLineSpacing(18.0);
+        registry.registerParagraphStyle(body);
+        return registry;
+    }
+}
+```
+
+然后把业务对象直接传给报告布局：
+
+```java
+ReportLayout layout = ReportLayout.builder()
+        .styleProfile(new BusinessReportStyleProfile())
+        .tableOfContents(3)
+        .build();
+
+ReportBlueprint blueprint = ReportBlueprint
+        .builder("assessment", "评估分析报告", "1.0")
+        .layout(layout)
+        .build();
+```
+
+使用当前八模块报告门面时，可以直接从模块模型传入，无需自行创建报告定义：
+
+```java
+ComposableReportModuleModel modules = ComposableReportModuleModel.builder()
+        .styleProfile(new CustomAssessmentStyleProfile())
+        .module(new ImpactAnalysisModuleData("影响分析正文。"))
+        .build();
+
+ComposableReportInput input = ComposableReportInput.builder(modules).build();
+new ComposableTextReportExporter().export(
+        input, Path.of("target", "custom-style-report.docx"));
+```
+
+仓库提供了可运行的完整实现 `CustomAssessmentStyleProfile`。`createRegistry()` 每次应返回
+新的 `StyleRegistry`；推荐先调用 `DefaultStyles.createRegistry()`，再以相同名称重新注册需要
+覆盖的样式。这样既能保留框架所需的全部基础样式，也能让不同报告使用互不影响的业务样式。
+
 ### 八个可组合评估模块
 
 | 模块 | 编码 | 数据对象 |
@@ -252,7 +373,9 @@ ComposableReportModuleModel modules = ComposableReportModuleModel.builder()
 | 脆弱性分析 | `vulnerability-analysis` | `VulnerabilityAnalysisModuleData` |
 | 功能优化分析 | `functional-optimization-analysis` | `FunctionalOptimizationAnalysisModuleData` |
 
-八个模块都拥有独立的 `AbstractReportModule<具体数据类型>` 实现。当前模板为每个模块输出一个标题和一段纯文本，后续可以独立扩展为表格、图片、子章节或其他业务对象，不会影响其他模块。
+八个模块分别保留独立业务数据类和独立模块类。当前内容虽然都是一段文本，但模块泛型始终是
+具体业务对象；模块类通过 `AbstractTextReportModule<T>` 复用文本适配逻辑。某个模块后续需要
+表格、图片或子章节时，可改为直接继承 `AbstractReportModule<T>`，不会影响其他模块。
 
 ## 运行内置示例
 

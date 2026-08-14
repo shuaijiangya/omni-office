@@ -4,7 +4,6 @@ import cn.bugstack.export.api.ReportOutputFormat;
 import cn.bugstack.export.core.ReportDocumentRenderer;
 import cn.bugstack.export.definition.ReportBlueprint;
 import cn.bugstack.export.definition.ReportLayout;
-import cn.bugstack.export.definition.ReportStyleProfile;
 import cn.bugstack.export.document.CaptionTargetType;
 import cn.bugstack.export.document.ReportCaption;
 import cn.bugstack.export.document.ReportClassDesignTable;
@@ -20,8 +19,6 @@ import cn.bugstack.export.document.ReportTable;
 import cn.bugstack.office.docx.api.DocxDocument;
 import cn.bugstack.office.docx.builder.SectionBuilder;
 import cn.bugstack.office.docx.render.AsposeWordsLicenseLoader;
-import cn.bugstack.office.docx.style.DefaultStyleProfile;
-import cn.bugstack.office.docx.style.Gjb438cStyleProfile;
 import com.aspose.words.Document;
 import com.aspose.words.SaveFormat;
 
@@ -216,16 +213,13 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
     }
 
     /**
-     * 使用报告内置样式画像创建默认 DOCX 文档。
+     * 使用报告配置的内置或业务自定义样式画像创建默认 DOCX 文档。
      *
      * @param blueprint 报告蓝图
      * @return 已应用默认样式画像的 DOCX 文档
      */
     private static DocxDocument createDefaultDocument(ReportBlueprint blueprint) {
-        if (blueprint.getLayout().getStyleProfile() == ReportStyleProfile.GJB_438C) {
-            return DocxDocument.create().useStyleProfile(Gjb438cStyleProfile.standard());
-        }
-        return DocxDocument.create().useStyleProfile(DefaultStyleProfile.standard());
+        return DocxDocument.create().useStyleProfile(blueprint.getLayout().getStyleProfile());
     }
 
     /**

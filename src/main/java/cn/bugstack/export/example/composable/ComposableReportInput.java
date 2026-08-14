@@ -1,15 +1,21 @@
 package cn.bugstack.export.example.composable;
 
+import cn.bugstack.export.composable.ComposableReportConfiguration;
 import cn.bugstack.export.definition.ReportCoverTemplate;
 import cn.bugstack.export.example.composable.model.ComposableReportCoverModel;
 import cn.bugstack.export.example.composable.model.ComposableReportModuleModel;
+import cn.bugstack.office.docx.style.StyleProfile;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * 可组合文本报告的业务入参。
  *
  * <p>入口只负责组合封面模型和模块模型：封面写在目录之前，模块内容写在目录之后。</p>
  */
-public final class ComposableReportInput {
+public final class ComposableReportInput implements ComposableReportConfiguration {
 
     /** 目录之前写入的封面模型。 */
     private final ReportCoverTemplate coverModel;
@@ -82,6 +88,50 @@ public final class ComposableReportInput {
      */
     public String getPreparedBy() {
         return preparedBy;
+    }
+
+    @Override
+    public String getReportTitle() {
+        return coverModel.getDocumentName();
+    }
+
+    @Override
+    public ReportCoverTemplate getReportCover() {
+        return coverModel;
+    }
+
+    @Override
+    public List<String> getSelectedModuleCodes() {
+        List<String> moduleCodes = new ArrayList<>();
+        for (ComposableReportModule module : moduleModel.getSelectedModules()) {
+            moduleCodes.add(module.getCode());
+        }
+        return Collections.unmodifiableList(moduleCodes);
+    }
+
+    @Override
+    public String getReportAuthor() {
+        return preparedBy;
+    }
+
+    @Override
+    public String getReportSubject() {
+        return "综合评估分析结果";
+    }
+
+    @Override
+    public StyleProfile getReportStyleProfile() {
+        return moduleModel.getStyleProfile();
+    }
+
+    @Override
+    public String getReportHeader() {
+        return moduleModel.getHeaderText();
+    }
+
+    @Override
+    public String getModuleFooter() {
+        return moduleModel.getPageNumberFooterFormat().getTemplate();
     }
 
     /** 可组合报告入参构建器。 */

@@ -10,7 +10,7 @@ import cn.bugstack.export.example.composable.model.ComposableReportModuleModel;
 import java.nio.file.Path;
 
 /**
- * 按入参任意组合八个纯文本模块的 Word 导出示例。
+ * 按入参任意组合八个对象型模块的 Word 导出示例。
  */
 public final class ComposableTextReportExportExample {
 

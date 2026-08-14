@@ -1,6 +1,6 @@
 package cn.bugstack.export.example.composable.model;
 
-import cn.bugstack.export.definition.ReportCoverTemplate;
+import cn.bugstack.export.definition.StandardReportCoverTemplate;
 import cn.bugstack.export.document.ReportElement;
 import cn.bugstack.export.document.ReportParagraph;
 
@@ -12,7 +12,7 @@ import java.util.List;
  *
  * <p>封面作为独立 Word Section 写在目录 Section 之前。</p>
  */
-public final class ComposableReportCoverModel implements ReportCoverTemplate {
+public final class ComposableReportCoverModel implements StandardReportCoverTemplate {
 
     /** 默认封面文档名称。 */
     public static final String DEFAULT_DOCUMENT_NAME = "评估分析报告";

@@ -1,6 +1,8 @@
 package cn.bugstack.export.example.composable.model;
 
+import cn.bugstack.export.definition.ReportStyleProfile;
 import cn.bugstack.export.example.composable.ComposableReportModule;
+import cn.bugstack.office.docx.style.StyleProfile;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -20,6 +22,8 @@ public final class ComposableReportModuleModel {
     private final String headerText;
     /** 目录和模块页使用的页码页脚外观。 */
     private final ComposablePageNumberFooterFormat pageNumberFooterFormat;
+    /** 整份报告使用的内置或业务自定义样式画像。 */
+    private final StyleProfile styleProfile;
     /** 按调用方顺序保存的模块数据。 */
     private final List<ComposableModuleData> moduleData;
     /** 按模块类型索引的模块数据。 */
@@ -28,6 +32,7 @@ public final class ComposableReportModuleModel {
     private ComposableReportModuleModel(Builder builder) {
         this.headerText = builder.headerText;
         this.pageNumberFooterFormat = builder.pageNumberFooterFormat;
+        this.styleProfile = builder.styleProfile;
         this.moduleData = Collections.unmodifiableList(new ArrayList<>(builder.moduleData));
         this.moduleDataByType = Collections.unmodifiableMap(new EnumMap<>(builder.moduleDataByType));
     }
@@ -49,6 +54,15 @@ public final class ComposableReportModuleModel {
         return pageNumberFooterFormat;
     }
 
+    /**
+     * 获取整份报告使用的样式画像。
+     *
+     * @return 内置或业务自定义样式画像
+     */
+    public StyleProfile getStyleProfile() {
+        return styleProfile;
+    }
+
     public List<ComposableModuleData> getModuleData() {
         return moduleData;
     }
@@ -62,9 +76,28 @@ public final class ComposableReportModuleModel {
     }
 
     public <T extends ComposableModuleData> T requireModuleData(ComposableReportModule module, Class<T> dataType) {
-        ComposableModuleData data = moduleDataByType.get(module);
+        T data = findModuleData(module, dataType);
         if (data == null) {
             throw new IllegalArgumentException("report module is not selected: " + module);
+        }
+        return data;
+    }
+
+    /**
+     * 查询当前组合中某个模块的强类型数据，未选择时返回 {@code null}。
+     *
+     * @param module 模块类型
+     * @param dataType 模块数据类型
+     * @param <T> 模块数据类型
+     * @return 模块数据；未选择时为 {@code null}
+     */
+    public <T extends ComposableModuleData> T findModuleData(ComposableReportModule module, Class<T> dataType) {
+        if (module == null || dataType == null) {
+            throw new IllegalArgumentException("report module and data type must not be null");
+        }
+        ComposableModuleData data = moduleDataByType.get(module);
+        if (data == null) {
+            return null;
         }
         if (!dataType.isInstance(data)) {
             throw new IllegalStateException("report module data type mismatch: " + module.getCode());
@@ -78,6 +111,7 @@ public final class ComposableReportModuleModel {
         private String headerText;
         private ComposablePageNumberFooterFormat pageNumberFooterFormat =
                 ComposablePageNumberFooterFormat.PAGE_ONLY;
+        private StyleProfile styleProfile = ReportStyleProfile.GJB_438C;
         private final List<ComposableModuleData> moduleData = new ArrayList<>();
         private final Map<ComposableReportModule, ComposableModuleData> moduleDataByType =
                 new EnumMap<>(ComposableReportModule.class);
@@ -102,6 +136,23 @@ public final class ComposableReportModuleModel {
                 throw new IllegalArgumentException("page number footer format must not be null");
             }
             this.pageNumberFooterFormat = format;
+            return this;
+        }
+
+        /**
+         * 设置整份报告的样式画像，默认使用 {@link ReportStyleProfile#GJB_438C}。
+         *
+         * <p>业务侧可以直接传入自行实现的 {@link StyleProfile}，无需修改报告定义或
+         * 框架内置样式枚举。</p>
+         *
+         * @param styleProfile 内置或业务自定义样式画像
+         * @return 当前构建器
+         */
+        public Builder styleProfile(StyleProfile styleProfile) {
+            if (styleProfile == null) {
+                throw new IllegalArgumentException("report style profile must not be null");
+            }
+            this.styleProfile = styleProfile;
             return this;
         }
 

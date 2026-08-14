@@ -8,6 +8,7 @@ import cn.bugstack.export.document.ReportDocument;
 import cn.bugstack.export.document.ReportElement;
 import cn.bugstack.export.document.ReportElementType;
 import cn.bugstack.export.document.ReportSectionBuilder;
+import cn.bugstack.export.example.style.CustomAssessmentStyleProfile;
 import cn.bugstack.office.docx.api.DocxDocument;
 import cn.bugstack.office.docx.model.DocxBlock;
 import cn.bugstack.office.docx.model.ParagraphNode;
@@ -28,6 +29,29 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DocxReportCompilerTest {
+
+    @Test
+    void appliesBusinessDefinedStyleProfileFromLayout() {
+        ReportDocument report = new ReportDocument();
+        report.setTitle("自定义样式报告");
+        report.getSections().add(ReportSectionBuilder.section("评估结果")
+                .paragraph("正文使用业务侧定义的字体和字号。")
+                .build());
+        ReportBlueprint blueprint = ReportBlueprint.builder("custom-style", "自定义样式报告", "1.0")
+                .layout(ReportLayout.builder()
+                        .styleProfile(new CustomAssessmentStyleProfile())
+                        .build())
+                .build();
+
+        DocxDocument document = new DocxReportCompiler().compile(report, blueprint);
+
+        assertEquals("微软雅黑", document.getStyleRegistry()
+                .getParagraphStyle("Title").getFarEastFontFamily());
+        assertEquals(12.0, document.getStyleRegistry()
+                .getParagraphStyle("BodyText").getFontSize());
+        assertEquals(16.0, document.getStyleRegistry()
+                .getParagraphStyle("Heading1").getFontSize());
+    }
 
     @Test
     void compilesBuiltInSemanticBlocksToDocx() throws Exception {

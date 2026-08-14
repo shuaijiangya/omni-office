@@ -1,10 +1,6 @@
 package cn.bugstack.export.example.composable;
 
-import cn.bugstack.export.definition.AbstractReportDefinition;
-import cn.bugstack.export.definition.ModuleSlot;
-import cn.bugstack.export.definition.ReportBlueprint;
-import cn.bugstack.export.definition.ReportLayout;
-import cn.bugstack.export.definition.ReportStyleProfile;
+import cn.bugstack.export.composable.AbstractComposableReportDefinition;
 import cn.bugstack.export.example.composable.model.ComparisonAnalysisModuleData;
 import cn.bugstack.export.example.composable.model.AssessmentCalculationAnalysisModuleData;
 import cn.bugstack.export.example.composable.model.FunctionalOptimizationAnalysisModuleData;
@@ -13,7 +9,6 @@ import cn.bugstack.export.example.composable.model.AssessmentScenarioConstructio
 import cn.bugstack.export.example.composable.model.VulnerabilityAnalysisModuleData;
 import cn.bugstack.export.example.composable.model.CombatProcessAnalysisModuleData;
 import cn.bugstack.export.example.composable.model.ContributionRateAnalysisModuleData;
-import cn.bugstack.export.example.composable.model.ComposableReportCoverModel;
 import cn.bugstack.export.example.composable.module.ComparisonAnalysisReportModule;
 import cn.bugstack.export.example.composable.module.AssessmentCalculationAnalysisReportModule;
 import cn.bugstack.export.example.composable.module.FunctionalOptimizationAnalysisReportModule;
@@ -27,49 +22,12 @@ import cn.bugstack.export.module.ReportDataContext;
 /**
  * 根据业务入参动态选择模块的报告定义。
  */
-public final class ComposableTextReportDefinition extends AbstractReportDefinition<ComposableReportInput> {
+public final class ComposableTextReportDefinition
+        extends AbstractComposableReportDefinition<ComposableReportInput> {
 
     /** 创建可组合文本报告定义。 */
     public ComposableTextReportDefinition() {
         super("composable-text-report", "评估报告", "1.0");
-    }
-
-    /**
-     * 只把入参选择的模块加入蓝图，选择顺序即 Word 章节顺序。
-     *
-     * @param builder 报告蓝图构建器
-     * @param input 可组合报告入参
-     */
-    @Override
-    protected void configure(ReportBlueprint.Builder builder, ComposableReportInput input) {
-        requireInput(input);
-        String pageNumberFooter = input.getModuleModel()
-                .getPageNumberFooterFormat().getTemplate();
-        ReportLayout.Builder layout = ReportLayout.builder()
-                .styleProfile(ReportStyleProfile.GJB_438C)
-                .headingNumberingEnabled(true)
-                .bodyTitle(false)
-                .tableOfContents(3)
-                .tableOfContentsFooter(pageNumberFooter)
-                .footer(pageNumberFooter)
-                .modulePageNumberStart(1);
-        if (input.getCoverModel() instanceof ComposableReportCoverModel) {
-            ComposableReportCoverModel standardCover =
-                    (ComposableReportCoverModel) input.getCoverModel();
-            layout.cover(standardCover.getDocumentName(),
-                    standardCover.getProjectName(), standardCover.getVersion());
-        } else {
-            layout.coverTemplate(input.getCoverModel());
-        }
-        if (hasText(input.getModuleModel().getHeaderText())) {
-            layout.header(input.getModuleModel().getHeaderText());
-        }
-        builder.title(input.getCoverModel().getDocumentName())
-                .metadata(input.getPreparedBy(), "综合评估分析结果")
-                .layout(layout.build());
-        for (ComposableReportModule module : input.getModuleModel().getSelectedModules()) {
-            builder.module(ModuleSlot.builder(module.getCode()).build());
-        }
     }
 
     /**
@@ -144,8 +102,4 @@ public final class ComposableTextReportDefinition extends AbstractReportDefiniti
         }
     }
 
-    /** 判断可选文本是否包含有效内容。 */
-    private boolean hasText(String value) {
-        return value != null && !value.trim().isEmpty();
-    }
 }

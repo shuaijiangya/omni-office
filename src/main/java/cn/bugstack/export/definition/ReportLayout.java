@@ -1,5 +1,7 @@
 package cn.bugstack.export.definition;
 
+import cn.bugstack.office.docx.style.StyleProfile;
+
 /**
  * 报告的版式和前置页配置。
  */
@@ -13,7 +15,7 @@ public final class ReportLayout {
     public static final String CHINESE_PAGE_NUMBER_FOOTER = DEFAULT_PAGE_NUMBER_FOOTER;
 
     /** 文档使用的样式画像。 */
-    private final ReportStyleProfile styleProfile;
+    private final StyleProfile styleProfile;
     /** 是否启用标题自动编号。 */
     private final boolean headingNumberingEnabled;
     /** 是否在模块正文开始位置输出报告主标题。 */
@@ -69,7 +71,7 @@ public final class ReportLayout {
      *
      * @return 样式画像
      */
-    public ReportStyleProfile getStyleProfile() {
+    public StyleProfile getStyleProfile() {
         return styleProfile;
     }
 
@@ -185,7 +187,7 @@ public final class ReportLayout {
     public static final class Builder {
 
         /** 待构建布局的样式画像。 */
-        private ReportStyleProfile styleProfile = ReportStyleProfile.DEFAULT;
+        private StyleProfile styleProfile = ReportStyleProfile.DEFAULT;
         /** 待构建布局是否启用标题编号。 */
         private boolean headingNumberingEnabled = true;
         /** 待构建布局是否输出正文主标题。 */
@@ -214,10 +216,13 @@ public final class ReportLayout {
         /**
          * 设置报告样式画像。
          *
-         * @param styleProfile 样式画像
+         * <p>可传入 {@link ReportStyleProfile} 的内置值，也可传入业务侧自行实现的
+         * {@link StyleProfile}，无需向框架枚举中增加常量。</p>
+         *
+         * @param styleProfile 内置或业务自定义样式画像
          * @return 当前构建器
          */
-        public Builder styleProfile(ReportStyleProfile styleProfile) {
+        public Builder styleProfile(StyleProfile styleProfile) {
             this.styleProfile = styleProfile;
             return this;
         }

@@ -8,19 +8,20 @@ import com.aspose.words.HeaderFooterType;
 import com.aspose.words.NumberStyle;
 import com.aspose.words.Paragraph;
 import com.aspose.words.Section;
-import cn.bugstack.export.example.composable.model.ComparisonAnalysisModuleData;
 import cn.bugstack.export.example.composable.model.AssessmentCalculationAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.AssessmentScenarioConstructionModuleData;
+import cn.bugstack.export.example.composable.model.CombatProcessAnalysisModuleData;
+import cn.bugstack.export.example.composable.model.ComparisonAnalysisModuleData;
 import cn.bugstack.export.example.composable.model.ComposableModuleData;
+import cn.bugstack.export.example.composable.model.ComposablePageNumberFooterFormat;
 import cn.bugstack.export.example.composable.model.ComposableReportCoverModel;
 import cn.bugstack.export.example.composable.model.ComposableReportModuleModel;
-import cn.bugstack.export.example.composable.model.ComposablePageNumberFooterFormat;
+import cn.bugstack.export.example.composable.model.ContributionRateAnalysisModuleData;
 import cn.bugstack.export.example.composable.model.FunctionalOptimizationAnalysisModuleData;
 import cn.bugstack.export.example.composable.model.ImpactAnalysisModuleData;
-import cn.bugstack.export.example.composable.model.AssessmentScenarioConstructionModuleData;
 import cn.bugstack.export.example.composable.model.VulnerabilityAnalysisModuleData;
+import cn.bugstack.export.example.style.CustomAssessmentStyleProfile;
 import cn.bugstack.export.template.cover.DocumentModificationRecordCoverTemplate;
-import cn.bugstack.export.example.composable.model.CombatProcessAnalysisModuleData;
-import cn.bugstack.export.example.composable.model.ContributionRateAnalysisModuleData;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -31,8 +32,9 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,6 +42,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@link ComposableTextReportExporter} 的模块组合回归测试。
  */
 class ComposableTextReportExporterTest {
+
+    /** 验证业务样式画像可通过现有模块模型传入，不需要修改报告定义。 */
+    @Test
+    void acceptsBusinessDefinedStyleProfileFromModuleModel() {
+        CustomAssessmentStyleProfile styleProfile = new CustomAssessmentStyleProfile();
+        ComposableReportModuleModel modules = ComposableReportModuleModel.builder()
+                .styleProfile(styleProfile)
+                .module(new ImpactAnalysisModuleData("自定义样式正文"))
+                .build();
+
+        assertSame(styleProfile, new ComposableTextReportDefinition()
+                .blueprint(reportInput("自定义样式报告", modules))
+                .getLayout()
+                .getStyleProfile());
+    }
 
     /**
      * 验证只导出入参选择的模块，并保持调用方指定的顺序。
@@ -138,6 +155,8 @@ class ComposableTextReportExporterTest {
                 () -> ComposableReportModuleModel.builder().build());
         assertThrows(IllegalArgumentException.class,
                 () -> ComposableReportInput.builder().build());
+        assertThrows(IllegalArgumentException.class,
+                () -> ComposableReportModuleModel.builder().styleProfile(null));
         assertThrows(IllegalArgumentException.class,
                 () -> ComposableReportModuleModel.builder()
                         .module(new AssessmentScenarioConstructionModuleData("第一次"))
