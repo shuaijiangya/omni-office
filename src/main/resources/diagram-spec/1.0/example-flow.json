@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "type": "FLOW",
+  "title": "文档生成流程",
+  "nodes": [
+    { "id": "start", "label": "开始", "type": "START" },
+    { "id": "build", "label": "构造 DocumentSpec", "type": "PROCESS" },
+    { "id": "review", "label": "校验通过？", "type": "DECISION" },
+    { "id": "export", "label": "导出 Word", "type": "PROCESS" },
+    { "id": "end", "label": "完成", "type": "END" }
+  ],
+  "edges": [
+    { "from": "start", "to": "build" },
+    { "from": "build", "to": "review" },
+    { "from": "review", "to": "export", "label": "是" },
+    { "from": "export", "to": "end" }
+  ]
+}

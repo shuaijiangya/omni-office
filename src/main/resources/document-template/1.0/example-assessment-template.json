@@ -1,0 +1,126 @@
+{
+  "schemaVersion": "1.0",
+  "templateId": "system.assessment",
+  "version": "1.0.0",
+  "name": "系统评估数据模板",
+  "description": "演示标量占位符、列表循环、表格循环和条件块。",
+  "dataSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["project", "summary", "capabilities", "risks", "includeAppendix"],
+    "properties": {
+      "project": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "author"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "author": { "type": "string", "minLength": 1, "maxLength": 100 }
+        }
+      },
+      "summary": { "type": "string", "minLength": 1, "maxLength": 5000 },
+      "capabilities": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 50,
+        "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+      },
+      "risks": {
+        "type": "array",
+        "maxItems": 100,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "description"],
+          "properties": {
+            "level": { "type": "string", "enum": ["高", "中", "低"] },
+            "description": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        }
+      },
+      "includeAppendix": { "type": "boolean" },
+      "contact": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 100 }
+        }
+      }
+    },
+    "allOf": [
+      {
+        "if": { "properties": { "includeAppendix": { "const": true } } },
+        "then": { "required": ["contact"] }
+      }
+    ]
+  },
+  "documentTemplate": {
+    "schemaVersion": "1.0",
+    "metadata": {
+      "title": "{{project.name}}评估报告",
+      "author": "{{project.author}}",
+      "subject": "系统能力与风险评估"
+    },
+    "layout": {
+      "styleProfile": "DEFAULT",
+      "headingNumberingEnabled": true,
+      "bodyTitleEnabled": true,
+      "tableOfContentsDepth": 3,
+      "pageNumberFooterEnabled": true,
+      "bodyPageNumberStart": 1
+    },
+    "sections": [
+      {
+        "title": "评估概述",
+        "blocks": [
+          { "type": "paragraph", "text": "{{summary}}" }
+        ]
+      },
+      {
+        "title": "能力清单",
+        "blocks": [
+          {
+            "type": "bulletList",
+            "items": [
+              { "$each": "capabilities", "$as": "capability", "$template": "{{capability}}" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "风险分析",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": ["等级", "风险描述"],
+            "rows": [
+              {
+                "$each": "risks",
+                "$as": "risk",
+                "$template": ["{{risk.level}}", "{{risk.description}}"]
+              }
+            ],
+            "columnWidths": [100, 400],
+            "styleName": "TableHeader",
+            "caption": "风险清单",
+            "captionAutoNumbered": true
+          }
+        ]
+      },
+      {
+        "title": "附录",
+        "blocks": [
+          {
+            "$if": "includeAppendix",
+            "$template": {
+              "type": "paragraph",
+              "text": "联系人：{{contact.name}}"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

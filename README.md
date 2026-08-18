@@ -2,7 +2,9 @@
 
 Omni Office 是一个面向 Java 应用的 Office 文档生成与报告编排项目。项目在 Aspose Words、Aspose Diagram 之上提供了更稳定的领域模型、Builder API 和报告模块机制，使业务代码不需要直接操作 Word 游标、段落节点或底层 OOXML。
 
-当前重点能力是生成结构化 Word/PDF 报告：业务可以按入参自由组合报告模块，替换封面模板，配置目录、样式、页眉、页脚和分节页码，同时保持每个模块的数据对象和实现类相互独立。
+当前项目同时支持三类入口：现有强类型 `export` 业务报告、内部 AI 生成，以及面向外部模型的
+Function Calling/MCP 服务。三类入口最终都收敛到受校验的报告语义模型和统一导出链路，输出
+DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 export 业务模板。
 
 ## 核心特性
 
@@ -18,9 +20,35 @@ Omni Office 是一个面向 Java 应用的 Office 文档生成与报告编排项
 - 支持业务实现公开的 `StyleProfile` 接口，自定义整套字体、字号、行距、段距和表格样式。
 - 支持 Word 原生多级标题编号、目录域、页码域、题注和交叉引用。
 - 支持段落、列表、表格、图片、Visio 预览、分页和类设计表格。
-- 支持 DOCX 和 PDF 输出，并使用临时文件保证文件导出的原子性。
+- 支持 DOCX、PDF 和单文件 HTML 输出，并使用临时文件保证文件导出的原子性。
 - 提供 SVG 用例图、流程图、ER 图以及 VSDX 图形输出能力。
 - 提供模块计划、条件判断、依赖校验、语义文档校验和阶段化异常信息。
+- 提供版本化 `DocumentSpec`、`DiagramSpec` 和 `DocumentTemplate` 协议及 JSON Schema。
+- 支持内部 AI 自由生成 DocumentSpec，或只填充模板业务数据；两种模式边界独立。
+- Function Calling、MCP stdio 与 MCP Streamable HTTP 复用同一个外部工具业务门面。
+- 支持 API Key/JWT、Origin、会话、限流、多租户、受控下载、审计及异步 MCP Tasks。
+- 支持模板审核发布、Schema 兼容迁移、AI 评测/人工审批和产物安全生命周期。
+
+## 端到端链路
+
+```mermaid
+flowchart LR
+    A[现有 export 业务对象] --> E[报告语义模型]
+    B[内部 AI] --> C[DocumentSpec 或模板数据]
+    D[外部 Function Calling / MCP] --> C
+    C --> V[Schema 与安全边界校验]
+    V --> E
+    E --> X[统一 export]
+    X --> W[DOCX]
+    X --> P[PDF]
+    X --> H[HTML]
+    C --> G[DiagramSpec]
+    G --> R[VSDX / PNG / OLE 工件]
+    R --> E
+```
+
+AI 输出始终按不受信输入处理。外部协议层只能调用受控工具，不能绕过 DocumentTemplate、
+DocumentSpec、DiagramSpec、工件目录和统一 export 的校验。
 
 ## 技术栈
 
@@ -30,6 +58,9 @@ Omni Office 是一个面向 Java 应用的 Office 文档生成与报告编排项
 | Maven | 项目构建、依赖描述和测试执行 |
 | Aspose Words for Java | DOCX 创建、Word 域、目录、页眉页脚、分节和 PDF 转换 |
 | Aspose Diagram for Java | VSDX 图形生成与编辑 |
+| Jackson | 严格 JSON 编解码、协议消息和持久化元数据 |
+| NetworkNT JSON Schema Validator | 模板业务数据和协议 Schema 校验 |
+| JDK HttpServer/HttpClient | 独立 MCP HTTP 服务、Ollama 与客户端适配 |
 | JUnit Jupiter | 单元测试和文档结构回归测试，版本 5.10.2 |
 | SVG/XML | 不依赖 Word 的用例图、流程图和 ER 图输出 |
 
@@ -37,19 +68,29 @@ Omni Office 是一个面向 Java 应用的 Office 文档生成与报告编排项
 
 ```text
 src/main/java/cn/bugstack
+├── application             # DocumentSpec、模板、AI、外部工具、HTTP 与治理应用层
+├── protocol                # 对外 DocumentSpec/DiagramSpec 协议对象
 ├── export
 │   ├── api                 # 导出请求、结果、格式和异常
 │   ├── composable          # 可组合报告配置契约与定义父类
 │   ├── core                # 导出生命周期、计划、校验和编排
 │   ├── definition          # 报告蓝图、布局、模块槽位和封面模板协议
 │   ├── document            # 与 Word 实现无关的报告语义模型
-│   ├── docx                # 语义文档到 DOCX/PDF 的编译适配器
+│   ├── docx                # 语义文档到 DOCX/PDF/HTML 的编译适配器
 │   ├── module              # 报告模块、注册表、条件和强类型数据上下文
 │   ├── template/cover      # 可直接用于业务的正式封面模板
 │   └── example             # 完整报告和可组合模块示例
 └── office
     ├── docx                # DOCX 组件树、Builder、样式、校验和 Aspose 渲染器
     └── diagram             # SVG/VSDX 图形定义与渲染器
+
+src/main/resources
+├── document-spec/1.0       # Schema、能力清单和示例
+├── diagram-spec/1.0        # 图协议 Schema、能力清单和示例
+├── document-template/1.0   # 模板协议、示例模板和示例数据
+├── internal-ai/1.0         # AI 能力清单和 Ollama 演示模板
+├── external-tools/1.0      # Function Calling/MCP 工具能力清单
+└── omni-service/1.0        # HTTP 服务能力清单
 ```
 
 ## 设计思路
@@ -69,10 +110,10 @@ flowchart LR
     G --> H[DocxReportCompiler]
     H --> I[DocxDocument 组件树]
     I --> J[AsposeDocxRenderer]
-    J --> K[DOCX / PDF]
+    J --> K[DOCX / PDF / HTML]
 ```
 
-这种边界让业务模块可以被独立测试，也让后续增加 HTML 或其他输出格式时不必重写业务组装逻辑。
+这种边界让业务模块可以被独立测试，也让 HTML 等目标格式复用相同业务组装和校验逻辑。
 
 ### 2. 定义、模块和导出职责分离
 
@@ -118,7 +159,7 @@ Section 3：业务模块，可选页眉，页码重新从 1 开始
 ### 前置要求
 
 - JDK 17 或更高版本。
-- Maven 3.8 或更高版本。
+- Maven 3.6.3 或更高版本。
 - Aspose Words 26.6 和 Aspose Diagram 26.6 对应 JAR。
 
 ### 本地依赖
@@ -174,6 +215,376 @@ byte[] content = exporter.exportToBytes(input);
 `ComposableTextReportDefinition` 继承公共定义父类，仅保留 `contributeData(...)`；
 `ComposableTextReportExporter` 继承公共导出门面并注册当前报告支持的 8 个模块。
 
+### 使用 DocumentSpec 动态生成文档
+
+不需要预定义业务章节时，可以使用 `DocumentSpec` 描述章节、段落、列表、表格、图片、
+子章节和分页符，再通过动态导出器复用现有语义校验及 DOCX/PDF/HTML 渲染链路：
+
+```java
+DocumentSpec spec = new DocumentSpec();
+spec.setMetadata(new DocumentMetadataSpec("系统评估报告"));
+spec.addSection(new SectionSpec("评估背景")
+        .addBlock(new ParagraphBlockSpec(
+                "本报告围绕系统能力、任务适应性和关键风险开展综合评估。")));
+
+DefaultDynamicDocumentExporter exporter = new DefaultDynamicDocumentExporter();
+byte[] docx = exporter.exportToBytes(spec, ReportOutputFormat.DOCX);
+byte[] pdf = exporter.exportToBytes(spec, ReportOutputFormat.PDF);
+```
+
+对外协议固定为 `DocumentSpec 1.0`。JSON Schema、能力清单和完整示例分别位于：
+
+```text
+src/main/resources/document-spec/1.0/schema.json
+src/main/resources/document-spec/1.0/capabilities.json
+src/main/resources/document-spec/1.0/example-simple.json
+src/main/resources/document-spec/1.0/example-complete.json
+```
+
+`DocumentSpecJsonCodec` 使用严格 JSON 反序列化，未知字段会被拒绝；
+`DocumentSpecValidator` 会在渲染前检查协议版本、必填内容、章节深度、块数量、文本长度、
+表格规模和样式白名单，并使用 JSON Path 返回错误位置。
+
+M2 提供 `DiagramSpec 1.0`、受控图工件存储和 Word 图形嵌入。`diagram` block 可以直接
+携带 `definition`，也可以通过 `diagramArtifactId` 复用提前生成的 VSDX/PNG 工件：
+
+```java
+DocumentGenerationApplication application = new DocumentGenerationApplication(
+        Path.of("target", "omni-office-artifacts"));
+
+DiagramArtifactReference artifact = application.generateDiagram(diagramSpec);
+diagramBlock.setDiagramArtifactId(artifact.getDiagramArtifactId());
+diagramBlock.setEmbedMode("EDITABLE_VISIO");
+
+byte[] docx = application.exportToBytes(documentSpec, ReportOutputFormat.DOCX);
+```
+
+内联模式设置 `diagramBlock.setDefinition(diagramSpec)`，导出时会自动生成并保存同源的
+VSDX 与 PNG。`EDITABLE_VISIO` 在 Word 中嵌入可双击编辑的 OLE 对象；
+`PREVIEW_IMAGE` 只写入 PNG，适用于不需要编辑的交付物和 PDF。对外返回的工件元数据
+不包含服务器路径。图协议文件位于：
+
+```text
+src/main/resources/diagram-spec/1.0/schema.json
+src/main/resources/diagram-spec/1.0/capabilities.json
+src/main/resources/diagram-spec/1.0/example-flow.json
+```
+
+### 使用版本化 DocumentTemplate
+
+对于“版式固定、由内部 AI 或外部服务填充结构化业务数据”的场景，使用独立的
+`DocumentTemplateApplication`。模板必须显式指定 `templateId` 和语义版本，不会自动选择
+最新版，也不会回退到现有 export 业务报告或自由 DocumentSpec：
+
+```java
+DocumentTemplateApplication templates = new DocumentTemplateApplication();
+templates.register(getClass().getResourceAsStream(
+        "/document-template/1.0/example-assessment-template.json"));
+
+byte[] docx = templates.exportToBytes(
+        "system.assessment",
+        "1.0.0",
+        businessDataJson,
+        ReportOutputFormat.DOCX);
+```
+
+模板先使用 JSON Schema draft 2020-12 校验数据，再通过受限映射生成 DocumentSpec。映射支持：
+
+- `{{project.name}}`：标量占位符；完整占位符保留布尔值、数字等 JSON 类型。
+- `$each`：在数组中按数据集合生成列表项、表格行或文档块。
+- `$if`：在数组中根据布尔字段决定是否生成一个元素。
+
+映射器不执行脚本或反射，不允许远程 JSON Schema 引用；展开后的结果仍需通过完整的
+`DocumentSpecValidator`。模板协议、能力清单和可运行示例位于：
+
+```text
+src/main/resources/document-template/1.0/schema.json
+src/main/resources/document-template/1.0/capabilities.json
+src/main/resources/document-template/1.0/example-assessment-template.json
+src/main/resources/document-template/1.0/example-assessment-data.json
+```
+
+现有 `export` 保持强类型业务报告入口，不注册到 `DocumentTemplateCatalog`。复杂业务计算、
+条件模块和领域约束继续由 export 负责；DocumentTemplate 只负责数据校验和文档结构映射。
+
+### 接入内部 AI 结构化生成
+
+内部 AI 通过 `StructuredAiClient` SPI 接入，核心模块不绑定模型供应商、HTTP 地址或鉴权协议。
+实现方收到系统指令、用户指令、上下文、输出 Schema、当前尝试次数及上次校验错误，并且必须
+返回只包含 JSON 的响应：
+
+```java
+StructuredAiClient internalModel = request -> internalAiGateway.generateJson(request);
+InternalAiDocumentApplication ai = new InternalAiDocumentApplication(internalModel);
+
+// 自由模式：AI 输出 DocumentSpec
+AiDocumentResult draft = ai.generateFreeform(
+        "根据评估材料生成包含概述、能力分析和风险结论的报告",
+        contextJson);
+
+// 业务方可以先检查 draft.getDocumentSpec()，确认后再导出
+byte[] docx = ai.exportToBytes(draft, ReportOutputFormat.DOCX);
+```
+
+模板模式只允许 AI 填充模板数据，不允许它生成章节：
+
+```java
+ai.registerTemplate(getClass().getResourceAsStream(
+        "/document-template/1.0/example-assessment-template.json"));
+
+AiDocumentResult draft = ai.generateFromTemplate(
+        "system.assessment",
+        "1.0.0",
+        "根据上下文填写系统评估数据",
+        contextJson);
+```
+
+两个入口不会互相回退。自由模式禁止 AI 生成图片路径、URL 和已有 artifactId；启用 M2 工件目录时，
+AI 可以生成内联 DiagramSpec。模型输出必须依次通过 JSON 解析、Schema/DocumentSpec 校验和 AI
+安全校验；默认最多校正两次。能力清单位于：
+
+```text
+src/main/resources/internal-ai/1.0/capabilities.json
+```
+
+### 使用本地 Ollama 生成演示文档
+
+`OllamaStructuredAiClient` 默认调用 `http://127.0.0.1:11434/api/chat`，通过 Ollama 的
+`format` 字段提交输出 JSON Schema，并关闭流式输出和思考文本。先确认本地模型可用：
+
+```bash
+ollama list
+ollama run qwen3.5:2b
+```
+
+编译并生成 Word 与 HTML 演示文档：
+
+```bash
+mvn -q -DskipTests compile \
+  dependency:build-classpath -Dmdep.outputFile=target/runtime-classpath.txt
+
+read -r OMNI_OFFICE_CP < target/runtime-classpath.txt
+java -cp "target/classes:$OMNI_OFFICE_CP" \
+  cn.bugstack.application.ai.ollama.OllamaAiDocumentExample \
+  qwen3.5:2b \
+  target/ai-demo/omni-office-m6-m10-report.docx \
+  target/ai-demo/omni-office-m6-m10-report.html
+```
+
+演示使用受控 `DocumentTemplate`：模型只填写 Schema 允许的业务字段，之后仍依次执行模板数据校验、
+DocumentSpec 映射和安全校验，再由统一 export 生成两个格式。输出文件位于 `target/ai-demo/`，不会提交
+到 Git。
+
+### 对外提供 Function Calling 与 MCP
+
+外部模型不直接调用内部 AI，也不访问服务器路径。M5 使用
+`ExternalDocumentToolApplication` 作为唯一业务门面，Function Calling 与 MCP 只负责协议适配，
+共同暴露以下工具：
+
+| 工具 | 输入边界 | 输出 |
+| --- | --- | --- |
+| `omni_templates_list` | 无 | 已注册模板的标识和精确版本 |
+| `omni_template_schema` | `templateId`、`version` | 模板业务数据 JSON Schema |
+| `omni_template_export` | 模板标识、版本、业务数据、格式 | DOCX/PDF/HTML 工件引用 |
+| `omni_document_export` | DocumentSpec 1.0 加 `outputFormat` | DOCX/PDF/HTML 工件引用 |
+| `omni_diagram_generate` | DiagramSpec 1.0 | `diagramArtifactId`、VSDX 与 PNG 工件引用 |
+
+图工具返回的 `diagramArtifactId` 可以继续写入 DocumentSpec 的 `diagram` block。这样外部 AI 可以先选择
+标准图类型并生成图工件，再把同一工件嵌入 Word；也可以直接在 DocumentSpec 中提交内联 DiagramSpec。
+
+Function Calling 适配器输出常见的 `type=function/function.parameters` 工具数组：
+
+```java
+ExternalDocumentToolApplication tools = new ExternalDocumentToolApplication(
+        Path.of("target", "external-artifacts"));
+FunctionCallingDocumentAdapter functions = new FunctionCallingDocumentAdapter(tools);
+
+String modelToolsJson = functions.listFunctionToolsJson();
+String resultJson = functions.invoke("omni_document_export", argumentsJson);
+// 业务网关根据 resultJson 中的 resourceUri 提供下载响应
+byte[] document = functions.readResource(resourceUri);
+```
+
+Function Calling 的会话关联字段（例如 tool call ID）由模型网关管理；本项目只维护稳定工具名、参数
+JSON Schema、业务调用和结果工件，避免绑定某一家模型 SDK。
+
+MCP 使用稳定协议 `2025-11-25` 的换行分隔 stdio 传输，同时兼容 `2025-06-18`。启动脚本不会向
+stdout 写日志，stdout 只包含 MCP JSON-RPC 消息：
+
+```bash
+MVN_BIN=/absolute/path/to/mvn \
+  ./scripts/run-mcp-stdio.sh /absolute/path/to/omni-office-artifacts
+```
+
+MCP Host 可将 `command` 配置为上述脚本，并将受控工件根目录作为第一个参数。服务实现
+`initialize`、`ping`、`tools/list`、`tools/call`、`resources/list`、
+`resources/templates/list` 和 `resources/read`。工具调用返回 `structuredContent`，同时为了兼容旧客户端
+返回 JSON 文本；生成文件以 `resource_link` 暴露，并通过 `resources/read` 返回 Base64 二进制内容。
+
+所有生成结果使用 `omni-office://artifacts/{uuid}`，外部调用方不能提交输出路径，响应也不会包含服务器
+文件路径。每个工件包含媒体类型、字节数和 SHA-256。协议能力清单位于：
+
+```text
+src/main/resources/external-tools/1.0/capabilities.json
+```
+
+MCP 生命周期、工具结果和二进制资源格式分别遵循官方
+[Lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)、
+[Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) 与
+[Resources](https://modelcontextprotocol.io/specification/2025-11-25/server/resources) 规范。
+
+### 部署 MCP Streamable HTTP 服务
+
+M6 在同一个 `ExternalDocumentToolApplication` 之上增加独立 HTTP 服务，不复制工具业务逻辑。
+服务默认绑定 `127.0.0.1`，同时提供 API Key 与 HS256 JWT 验证、Origin 校验、请求体上限、
+身份限流、并发限制、超时、会话过期以及租户目录隔离。启动本地服务：
+
+```bash
+export OMNI_OFFICE_API_KEYS='local-dev-key=default:developer'
+export OMNI_OFFICE_DATA_ROOT="$PWD/target/omni-office-service"
+MVN_BIN=/absolute/path/to/mvn \
+  ./scripts/run-mcp-http.sh
+```
+
+API Key 配置格式为 `key=tenant:principal`，多个凭证使用逗号分隔。JWT 必须包含 `tenant`、
+`sub`、`exp` 和 `scope` claims，可使用 `mcp:invoke`、`artifacts:read` 或 `*` scope：
+
+```bash
+export OMNI_OFFICE_JWT_SECRET='replace-with-at-least-32-characters'
+export OMNI_OFFICE_JWT_ISSUER='https://identity.example.com'
+export OMNI_OFFICE_JWT_AUDIENCE='omni-office'
+```
+
+服务端点如下：
+
+| 端点 | 用途 |
+| --- | --- |
+| `POST /mcp` | Streamable HTTP JSON 响应模式；初始化后必须传会话和协议版本头 |
+| `GET /mcp` | 当前不启用服务端 SSE 流，按规范返回 `405 Method Not Allowed` |
+| `DELETE /mcp` | 主动销毁当前身份绑定的 MCP 会话与任务执行器 |
+| `GET /artifacts/{id}` | 鉴权下载本租户产物，不接受文件路径 |
+| `GET /health/live` | 进程存活检查 |
+| `GET /health/ready` | 数据目录可写就绪检查 |
+| `GET /metrics` | Prometheus 文本格式的请求、错误、下载与会话指标 |
+
+客户端必须在 `Accept` 中同时声明 `application/json` 和 `text/event-stream`。服务校验所有带
+`Origin` 的请求；如果浏览器来源未列入 `OMNI_OFFICE_ALLOWED_ORIGINS`，会返回 403。命令行客户端
+通常不发送 Origin。完整 Java 客户端位于
+`cn.bugstack.application.external.client.OmniOfficeMcpHttpClient`，也可直接运行：
+
+```bash
+OMNI_OFFICE_API_KEY=local-dev-key ./scripts/mcp-http-curl-example.sh
+```
+
+HTTP 身份同时绑定会话和异步任务。租户 A 生成的资源 ID 即使泄漏，租户 B 也无法下载。
+HS256 JWT 适合接入已有签发系统；本项目不是 OAuth 授权服务器。面向不受信网络部署时，应由企业
+OAuth 2.1/OIDC 授权服务器签发和治理访问令牌，并按官方
+[Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) 规范补充
+Protected Resource Metadata。
+
+### 管理模板与 Schema 版本
+
+M7 提供 `FileDocumentTemplateCatalog`。每个 `templateId@version` 原子落盘且不可覆盖，工作流为：
+
+```text
+DRAFT → IN_REVIEW → PUBLISHED
+                  ↘ REJECTED → IN_REVIEW
+```
+
+只有 `PUBLISHED` 版本会出现在 `omni_templates_list`，也只有发布版本能被模板 AI 或外部工具使用。
+提交人与审核人、审核意见和时间均写入版本记录。运维 CLI 示例：
+
+```bash
+MVN_BIN=/absolute/path/to/mvn \
+  ./scripts/template-admin.sh target/omni-office-service default create \
+  src/main/resources/document-template/1.0/example-assessment-template.json author
+
+./scripts/template-admin.sh target/omni-office-service default submit \
+  system.assessment 1.0.0 author
+
+./scripts/template-admin.sh target/omni-office-service default approve \
+  system.assessment 1.0.0 reviewer 'schema and mapping reviewed'
+```
+
+`ProtocolSchemaRegistry` 保存不可覆盖的协议 Schema 版本和 SHA-256；
+`JsonSchemaCompatibilityChecker` 检查新增必填字段、删除字段和字段类型变化；
+`SchemaMigrationRegistry` 只执行调用方注册的完整迁移链，不隐式猜测目标版本。
+
+### AI 评测、追踪和人工审核
+
+M8 把三类职责分开：
+
+- `TracingStructuredAiClient` 包装任何模型适配器，记录供应商、模型、操作、重试、耗时、字符数和
+  输入/输出 SHA-256，不保存系统提示词、用户指令、上下文或模型输出正文。
+- `AiEvaluationRunner` 执行可复现评测集，检查 DocumentSpec JSON Pointer、必含文本和最大重试次数，
+  输出逐用例错误与通过率。
+- `FileAiDraftReviewService` 保存 AI DocumentSpec 快照，实行提交人与审批人分离；只有 `APPROVED`
+  草稿可以从该审核出口导出，拒绝必须填写原因，终态不可改写。
+
+JSON Lines 轨迹库可直接用于单实例部署；生产环境可以实现 `AiTraceStore` 接入 OpenTelemetry、数据库
+或日志平台。生成链路本身仍然执行 M1～M4 的 Schema、安全和 DocumentSpec 校验，观测能力不会放宽校验。
+
+### 产物生命周期、安全扫描和异步任务
+
+M9 的 `ExternalArtifactStore` 是本地盘和对象存储的统一边界。默认本地产物保存 24 小时，元数据包含
+创建时间、过期时间、大小和 SHA-256；HTTP 服务每小时清理过期产物，读取时再次校验元数据。
+`ObjectStorageExternalArtifactStore` 可通过 `ArtifactObjectStorage` 适配 S3、OSS 或 MinIO，并只在服务端
+受控目录建立读取缓存。
+
+默认发布前安全检查包括：
+
+- 文件签名与声明媒体类型一致；
+- ZIP 条目数量、总解压大小、重复条目和路径穿越；
+- OOXML 外部关系阻断；
+- 内容大小和发布后摘要一致性。
+
+`SensitiveDataArtifactScanner` 可用于阻断文本中的私钥或疑似密钥；`ClamAvArtifactScanner` 可调用绝对路径
+指定的 `clamdscan`。病毒库和扫描命令属于部署依赖，未配置时项目不会声称已执行病毒扫描。
+`AuditLog` 记录租户、主体、操作、结果和时间，不记录凭证与文档正文。
+
+MCP `2025-11-25` 会话支持实验性 Tasks：工具在 `tools/list` 声明
+`execution.taskSupport=optional`，调用方可在 `tools/call.params.task` 中提交 TTL，再使用
+`tasks/get`、`tasks/result`、`tasks/list` 和 `tasks/cancel`。任务 ID 使用 UUID，HTTP 任务绑定认证会话；
+匿名 stdio 不开放 `tasks/list`。该能力遵循官方
+[Tasks](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks) 状态机。
+
+### HTML 输出与容器部署
+
+M10 将 `HTML` 加入公共 `ReportOutputFormat`，DocumentSpec、模板导出、内部 AI 导出和外部工具复用同一
+语义编译链。HTML 由 Aspose 从同一 DOCX 中间结果转换，图片使用 Base64 内嵌，因此下载结果是单文件：
+
+```java
+byte[] html = new DocumentGenerationApplication(artifactRoot)
+        .exportToBytes(documentSpec, ReportOutputFormat.HTML);
+```
+
+容器启动前仍需在本地 `lib/` 提供项目要求的两个 Aspose JAR。复制环境模板后可以构建：
+
+```bash
+cp .env.example .env
+# 必须先替换示例 API Key；.env 已加入 .gitignore
+docker compose up --build
+```
+
+容器以非 root 用户运行，数据卷挂载到 `/data`，健康检查调用 `/health/ready`，并安装
+`fonts-noto-cjk` 作为中文 PDF/HTML 渲染字体。Aspose License 仍按前文通过外部挂载文件及
+`ASPOSE_WORDS_LICENSE_PATH` 配置，不应打入镜像。`.env.example` 仅用于本地启动示例，不能作为公网凭证。
+
+### 里程碑状态
+
+| 里程碑 | 已实现结果 |
+| --- | --- |
+| M1 | DocumentSpec 1.0 → DOCX/PDF/HTML，严格 JSON 与语义校验 |
+| M2 | DiagramSpec、VSDX/PNG 工件与 Word 可编辑/预览嵌入 |
+| M3 | 显式版本 DocumentTemplate 与受限数据映射 |
+| M4 | 内部结构化 AI、校正重试与 Ollama 适配器 |
+| M5 | 共享外部工具门面、Function Calling 与 MCP stdio |
+| M6 | Streamable HTTP、API Key/JWT、Origin、会话、多租户、下载、限流/超时 |
+| M7 | Schema 兼容/迁移、持久化模板审核发布、Java/curl 接入示例 |
+| M8 | AI 调用轨迹、评测报告、四眼人工审核 |
+| M9 | 生命周期、对象存储 SPI、安全/病毒扫描适配、审计、MCP Tasks |
+| M10 | 服务配置、健康/指标、Docker/Compose 与 HTML 输出 |
+
 未显式设置的报告内容会使用以下默认值：
 
 | 配置 | 默认值 |
@@ -194,7 +605,9 @@ byte[] content = exporter.exportToBytes(input);
 mvn clean test
 ```
 
-生成的 DOCX、PDF、SVG、VSDX 和测试产物位于 `target/`，该目录不会提交到 Git。
+截至 2026-08-18，完整测试集包含 142 项测试，结果为 0 failure、0 error、0 skipped；覆盖真实本地 HTTP
+会话、多租户隔离、异步任务、模板治理、AI 审核以及 DOCX 结构。生成的 DOCX、PDF、HTML、SVG、VSDX
+和测试产物位于 `target/`，该目录不会提交到 Git。
 
 ### 使用默认封面组合报告
 
@@ -410,6 +823,7 @@ Windows 请把 classpath 中的 `:` 替换为 `;`。
 | `EditableVisioWordExample` | Word 中的 Visio 预览和可编辑 Visio 文件 |
 | `MultiLevelHeadingExample` | Word 原生一至九级标题编号 |
 | `SvgDiagramExample` | 用例图、流程图和 ER 图 SVG 文件 |
+| `OllamaAiDocumentExample` | 本地模型填充模板数据并输出 DOCX/HTML；按前文完整依赖 classpath 运行 |
 
 ## 自定义报告模块
 
@@ -477,14 +891,14 @@ public final class CustomCoverTemplate implements ReportCoverTemplate {
 - 模块槽位、模块注册表、条件注册表和计划解析。
 - 强类型 `ReportDataContext` 和模块数据键。
 - 报告语义树及其结构校验。
-- DOCX/PDF 编译器、内存字节导出和文件导出。
+- DOCX/PDF/HTML 编译器、内存字节导出和文件导出。
 - 自定义语义元素编译器扩展点。
 
 ### DOCX 封装
 
 - 文档、Section、段落、表格、行、单元格和 Inline 组件树。
 - A4/Letter/A3、横竖版、页边距和文档元数据。
-- 样式注册表、默认样式和 GJB 438C 样式入口。
+- 样式注册表、默认样式、中文技术简报和 GJB 438C 样式入口。
 - Word 原生九级标题编号和自动目录域。
 - 分节页眉页脚、PAGE 域和独立页码体系。
 - 默认封面、动态封面、修订记录页和审批页。
@@ -492,6 +906,16 @@ public final class CustomCoverTemplate implements ReportCoverTemplate {
 - 图片、Visio 预览、题注、题注引用、列表和分页。
 - 基于源码和 Javadoc 的类设计表格生成。
 - Aspose License 的安全外部加载。
+
+### AI、模板与外部服务
+
+- DocumentSpec/DiagramSpec 的版本化 Schema、能力清单、严格 JSON 和语义校验。
+- DocumentTemplate 数据 Schema、受限映射、持久化版本以及草稿/审核/发布流程。
+- 内部 AI 自由文档与模板数据填充双模式、校正重试、隐私追踪、评测和四眼审批。
+- Function Calling、MCP stdio 与 Streamable HTTP 的统一工具门面。
+- API Key/JWT、Origin、会话、限流、超时、多租户、审计及受控工件下载。
+- 本地盘/对象存储工件边界、过期清理、完整性扫描、OOXML 安全扫描和可选 ClamAV。
+- MCP 2025-11-25 实验性 Tasks 状态机和会话级任务清理。
 
 ### 图形输出
 
@@ -523,6 +947,11 @@ public final class CustomCoverTemplate implements ReportCoverTemplate {
 - 标题编号、目录域、题注引用和表格结构。
 - DOCX 编译器、输出文件保护和自定义语义元素。
 - SVG/VSDX 图形渲染和源码类设计解析。
+- DocumentSpec、DiagramSpec、模板 Schema、映射展开和版本迁移。
+- Function Calling/MCP 工具一致性、HTTP 认证、Origin、会话和跨租户隔离。
+- AI 重试、安全校验、隐私轨迹、评测以及人工审核状态机。
+- 工件生命周期、对象存储、安全扫描、审计和异步任务。
+- HTML 单文件输出、表格跨页表头及中文目录样式回归。
 
 建议提交代码前运行：
 
@@ -535,12 +964,15 @@ mvn test
 - Aspose JAR 使用本地 `systemPath`，开源仓库不会携带二进制文件；后续可迁移到企业 Maven 私服。
 - 可组合评估模块当前只输出一段文本，业务可基于独立数据类型逐个扩展复杂内容。
 - Word 目录和页码属于动态域，不同阅读器可能在首次打开时重新计算。
-- 中文排版依赖运行环境字体；Linux 容器应安装宋体、黑体或配置合适的字体替代。
-- 当前没有绑定 Spring、数据库或 Web 框架，应用层需要自行完成依赖注入和 HTTP 下载接口。
-- 后续可以增加 HTML 渲染器、模板持久化、模块配置中心和更多报告样式画像。
+- 中文排版依赖运行环境字体；项目容器已安装 Noto CJK，其他部署方式需要提供等价字体。
+- 内置 HTTP 服务使用 JDK HttpServer 并提供 JSON 响应模式，当前未提供服务端 SSE 消息流。
+- 项目验证 HS256 JWT，但不是 OAuth 授权服务器；公网部署应接入企业 OAuth 2.1/OIDC 和短期令牌。
+- S3、OSS、MinIO 与 ClamAV 以适配边界提供，只有配置真实实现和扫描命令后才能声明启用。
+- JSON Lines 轨迹、审计和文件模板目录适合单实例；多实例生产部署应接入共享存储和统一观测平台。
 
 ## 安全与仓库约定
 
-- 不提交 `lib/`、`target/`、Aspose License、IDE 工作区文件和本地生成文档。
+- 不提交 `lib/`、`target/`、`.env`、Aspose License、IDE 工作区文件和本地生成文档。
 - License 通过环境变量或系统属性从仓库外部加载。
 - 输出文件先写入临时文件，成功后再替换目标文件，降低失败导出破坏已有报告的风险。
+- `.env.example` 中的 API Key 只供本地示例，部署前必须更换；日志和审计不得记录凭证或文档正文。

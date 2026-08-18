@@ -39,7 +39,7 @@ public final class MultiLevelHeadingExample {
                 .useDefaultStyles()
                 .enableHeadingNumbering()
                 .metadata("Word 原生多级标题编号示例", "luojiang", "omni-office")
-                .tableOfContents("目录", 9)
+                .tableOfContents("目  录", 9)
                 .header("多级标题自动编号示例")
                 .footer("第 PAGE 页")
                 .section()

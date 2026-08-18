@@ -70,6 +70,29 @@ class AsposeDocxRendererTest {
     }
 
     @Test
+    void repeatsHeaderAndKeepsRowsIntactForHeaderTableStyle() throws Exception {
+        Path dir = Files.createTempDirectory("docx-table-pagination");
+        Path output = dir.resolve("table-pagination.docx");
+
+        DocxDocument.create()
+                .section()
+                .table()
+                .style("TableHeader")
+                .headers("模块", "职责")
+                .row("Document", "文档入口")
+                .end()
+                .end()
+                .save(output);
+
+        Document rendered = new Document(output.toString());
+        Table table = (Table) rendered.getChildNodes(NodeType.TABLE, true).get(0);
+
+        assertTrue(table.getFirstRow().getRowFormat().getHeadingFormat());
+        assertFalse(table.getFirstRow().getRowFormat().getAllowBreakAcrossPages());
+        assertFalse(table.getLastRow().getRowFormat().getAllowBreakAcrossPages());
+    }
+
+    @Test
     void rendersHeading1AsRealWordHeadingStyle() throws Exception {
         Path dir = Files.createTempDirectory("docx-heading-style");
         Path output = dir.resolve("heading.docx");
@@ -310,9 +333,39 @@ class AsposeDocxRendererTest {
         assertEquals(0.0, tocRange.getParagraphFormat().getLeftIndent());
         assertEquals(ParagraphAlignment.LEFT, tocIdentifier.getParagraphFormat().getAlignment());
         assertEquals(24.0, tocIdentifier.getParagraphFormat().getLeftIndent());
+        boolean hasDirtyTocField = false;
+        for (Field field : rendered.getRange().getFields()) {
+            if (field.getType() == FieldType.FIELD_TOC && field.isDirty()) {
+                hasDirtyTocField = true;
+                break;
+            }
+        }
+        assertTrue(hasDirtyTocField);
         try (ZipFile docx = new ZipFile(output.toFile())) {
             assertNotNull(docx.getEntry("word/numbering.xml"));
         }
+    }
+
+    @Test
+    void appliesBusinessBriefFontToTableOfContentsTitleAndEntries() throws Exception {
+        Path dir = Files.createTempDirectory("docx-business-brief-toc");
+        Path output = dir.resolve("business-brief-toc.docx");
+
+        DocxDocument.create()
+                .useStyleProfile(cn.bugstack.office.docx.style.BusinessBriefStyleProfile.standard())
+                .enableHeadingNumbering()
+                .tableOfContents("目录", 1)
+                .section()
+                .heading1("范围")
+                .end()
+                .save(output);
+
+        Document rendered = new Document(output.toString());
+        Paragraph title = findParagraphWithStyle(rendered, "目录", StyleIdentifier.TITLE);
+        Paragraph entry = findParagraphWithStyle(rendered, "范围", StyleIdentifier.TOC_1);
+
+        assertEquals("Noto Sans CJK SC", title.getRuns().get(0).getFont().getNameFarEast());
+        assertEquals("Noto Sans CJK SC", entry.getRuns().get(0).getFont().getNameFarEast());
     }
 
     @Test

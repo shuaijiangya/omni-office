@@ -8,6 +8,8 @@ import cn.bugstack.export.document.CaptionTargetType;
 import cn.bugstack.export.document.ReportCaption;
 import cn.bugstack.export.document.ReportClassDesignTable;
 import cn.bugstack.export.document.ReportDocument;
+import cn.bugstack.export.document.ReportDiagram;
+import cn.bugstack.export.document.ReportDiagramEmbedMode;
 import cn.bugstack.export.document.ReportElement;
 import cn.bugstack.export.document.ReportImage;
 import cn.bugstack.export.document.ReportListItem;
@@ -21,6 +23,7 @@ import cn.bugstack.office.docx.builder.SectionBuilder;
 import cn.bugstack.office.docx.render.AsposeWordsLicenseLoader;
 import com.aspose.words.Document;
 import com.aspose.words.SaveFormat;
+import com.aspose.words.HtmlSaveOptions;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -35,7 +38,7 @@ import java.util.List;
  * 报告语义文档到现有 {@link DocxDocument} 的编译适配器。
  *
  * <p>该类是 export 与 office.docx 的唯一直接耦合点。报告模块不感知 Aspose，
- * 因而同一语义文档未来可以继续增加 HTML 等其他目标编译器。</p>
+ * 因而同一语义文档可以复用为 DOCX、PDF 和 HTML 输出。</p>
  */
 public final class DocxReportCompiler implements ReportDocumentRenderer {
 
@@ -110,7 +113,7 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
     }
 
     /**
-     * 将报告语义树渲染为 docx 或 PDF 文件。
+     * 将报告语义树渲染为 DOCX、PDF 或 HTML 文件。
      *
      * <p>渲染过程先写入同目录临时文件，只有目标格式生成成功后才替换最终输出文件，
      * 避免失败导出破坏已有报告。</p>
@@ -133,11 +136,8 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
                 Files.createDirectories(parent);
             }
             temporaryOutput = Files.createTempFile(parent, "report-export-", suffixFor(format));
-            if (format == ReportOutputFormat.DOCX) {
-                compile(document, blueprint).save(temporaryOutput);
-            } else {
-                renderPdf(document, blueprint, temporaryOutput);
-            }
+            if (format == ReportOutputFormat.DOCX) compile(document, blueprint).save(temporaryOutput);
+            else Files.write(temporaryOutput, renderToBytes(document, blueprint, format));
             moveCompletedFile(temporaryOutput, outputPath);
         } catch (Exception e) {
             throw new IllegalStateException("failed to render report to " + format + ": " + outputPath, e);
@@ -155,8 +155,8 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
     /**
      * 将报告语义树渲染为内存字节。
      *
-     * <p>DOCX 直接由封装层写入内存；PDF 则基于同一份 DOCX 字节完成转换，以保证
-     * 两种输出使用一致的样式、页眉页脚和报告内容。</p>
+     * <p>DOCX 直接由封装层写入内存；PDF 与 HTML 基于同一份 DOCX 字节完成转换，保证
+     * 三种输出使用一致的样式、页眉页脚和报告内容。</p>
      *
      * @param document 报告语义文档
      * @param blueprint 报告蓝图
@@ -170,7 +170,10 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
         }
         try {
             byte[] docxBytes = compile(document, blueprint).toByteArray();
-            return format == ReportOutputFormat.DOCX ? docxBytes : convertToPdf(docxBytes);
+            if (format == ReportOutputFormat.DOCX) return docxBytes;
+            if (format == ReportOutputFormat.PDF) return convertToPdf(docxBytes);
+            if (format == ReportOutputFormat.HTML) return convertToHtml(docxBytes);
+            throw new IllegalArgumentException("unsupported report output format: " + format);
         } catch (Exception e) {
             throw new IllegalStateException("failed to render report to " + format + " bytes", e);
         }
@@ -236,7 +239,7 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
             document.enableHeadingNumbering();
         }
         if (layout.getTableOfContentsDepth() != null) {
-            document.tableOfContents("目录", layout.getTableOfContentsDepth());
+            document.tableOfContents("目  录", layout.getTableOfContentsDepth());
             document.tableOfContentsFooter(layout.getTableOfContentsFooterText());
         }
         if (hasText(layout.getHeaderText())) {
@@ -351,6 +354,8 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
             writeTable(target, (ReportTable) element);
         } else if (element instanceof ReportImage) {
             writeImage(target, (ReportImage) element);
+        } else if (element instanceof ReportDiagram) {
+            writeDiagram(target, (ReportDiagram) element);
         } else if (element instanceof ReportPageBreak) {
             target.pageBreak();
         } else if (element instanceof ReportClassDesignTable) {
@@ -426,6 +431,18 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
             target.paragraph().image(image.getSource(), image.getWidth(), image.getHeight()).end();
         }
         writeCaption(target, image.getCaption());
+    }
+
+    /** 将图形写为普通预览图或内嵌可编辑 VSDX 的 OLE 对象。 */
+    private void writeDiagram(SectionBuilder target, ReportDiagram diagram) {
+        if (diagram.getEmbedMode() == ReportDiagramEmbedMode.PREVIEW_IMAGE) {
+            target.paragraph().image(diagram.getPreviewSource(), diagram.getMaxWidthPoints(),
+                    diagram.getMaxHeightPoints()).end();
+        } else {
+            target.paragraph().editableVisio(diagram.getVsdxSource(), diagram.getPreviewSource(),
+                    diagram.getMaxWidthPoints(), diagram.getMaxHeightPoints()).end();
+        }
+        writeCaption(target, diagram.getCaption());
     }
 
     /**
@@ -514,6 +531,18 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
         }
     }
 
+    private byte[] convertToHtml(byte[] docxBytes) throws Exception {
+        AsposeWordsLicenseLoader.applyConfiguredLicense();
+        try (ByteArrayInputStream input = new ByteArrayInputStream(docxBytes);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            Document document = new Document(input);
+            HtmlSaveOptions options = new HtmlSaveOptions(SaveFormat.HTML);
+            options.setExportImagesAsBase64(true);
+            document.save(output, options);
+            return output.toByteArray();
+        }
+    }
+
     /**
      * 校验输出文件扩展名与目标格式匹配。
      *
@@ -522,7 +551,7 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
      */
     private void validateOutputPath(ReportOutputFormat format, Path outputPath) {
         String fileName = outputPath.getFileName() == null ? "" : outputPath.getFileName().toString().toLowerCase();
-        String expectedSuffix = format == ReportOutputFormat.DOCX ? ".docx" : ".pdf";
+        String expectedSuffix = suffixFor(format);
         if (!fileName.endsWith(expectedSuffix)) {
             throw new IllegalArgumentException("report output path must end with " + expectedSuffix);
         }
@@ -535,7 +564,12 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
      * @return 文件后缀
      */
     private String suffixFor(ReportOutputFormat format) {
-        return format == ReportOutputFormat.DOCX ? ".docx" : ".pdf";
+        switch (format) {
+            case DOCX: return ".docx";
+            case PDF: return ".pdf";
+            case HTML: return ".html";
+            default: throw new IllegalArgumentException("unsupported report output format: " + format);
+        }
     }
 
     /**

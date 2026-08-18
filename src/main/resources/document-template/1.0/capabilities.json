@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0",
+  "generationKind": "DOCUMENT_TEMPLATE",
+  "requiresExplicitVersion": true,
+  "inputSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "mapping": {
+    "scalarPlaceholder": "{{path.to.value}}",
+    "arrayDirectives": ["$each", "$if"],
+    "arbitraryCodeExecution": false,
+    "externalSchemaReferences": false
+  },
+  "output": "DocumentSpec@1.0",
+  "fallbackToBusinessReport": false,
+  "fallbackToDynamicDocument": false
+}

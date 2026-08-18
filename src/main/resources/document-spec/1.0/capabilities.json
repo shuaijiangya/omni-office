@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0",
+  "outputFormats": ["DOCX", "PDF", "HTML"],
+  "styleProfiles": ["DEFAULT", "BUSINESS_BRIEF", "GJB_438C"],
+  "blocks": [
+    { "type": "paragraph", "renderable": true },
+    { "type": "bulletList", "renderable": true },
+    { "type": "numberedList", "renderable": true },
+    { "type": "table", "renderable": true },
+    { "type": "image", "renderable": true },
+    { "type": "subsection", "renderable": true },
+    { "type": "pageBreak", "renderable": true },
+    {
+      "type": "diagram",
+      "renderable": true,
+      "inputs": ["diagramArtifactId", "definition"],
+      "embedModes": ["PREVIEW_IMAGE", "EDITABLE_VISIO"]
+    }
+  ]
+}

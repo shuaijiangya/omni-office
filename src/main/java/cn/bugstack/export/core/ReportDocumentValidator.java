@@ -2,6 +2,8 @@ package cn.bugstack.export.core;
 
 import cn.bugstack.export.document.ReportClassDesignTable;
 import cn.bugstack.export.document.ReportDocument;
+import cn.bugstack.export.document.ReportDiagram;
+import cn.bugstack.export.document.ReportDiagramEmbedMode;
 import cn.bugstack.export.document.ReportElement;
 import cn.bugstack.export.document.ReportImage;
 import cn.bugstack.export.document.ReportListItem;
@@ -93,6 +95,8 @@ public final class ReportDocumentValidator {
                         && (image.getWidth() <= 0 || image.getHeight() <= 0)) {
                     errors.add("report image width and height must be greater than zero at " + elementPath);
                 }
+            } else if (element instanceof ReportDiagram) {
+                validateDiagram((ReportDiagram) element, elementPath, errors);
             } else if (element instanceof ReportClassDesignTable) {
                 ReportClassDesignTable table = (ReportClassDesignTable) element;
                 if (table.getSourceRoot() == null || !hasText(table.getClassName())) {
@@ -103,6 +107,22 @@ public final class ReportDocumentValidator {
                     errors.add("class design table title must not be blank at " + elementPath);
                 }
             }
+        }
+    }
+
+    private void validateDiagram(ReportDiagram diagram, String path, List<String> errors) {
+        if (!hasText(diagram.getPreviewSource())) {
+            errors.add("report diagram preview source must not be blank at " + path);
+        }
+        if (diagram.getEmbedMode() == null) {
+            errors.add("report diagram embed mode must not be null at " + path);
+        } else if (diagram.getEmbedMode() == ReportDiagramEmbedMode.EDITABLE_VISIO
+                && !hasText(diagram.getVsdxSource())) {
+            errors.add("editable report diagram VSDX source must not be blank at " + path);
+        }
+        if (!Double.isFinite(diagram.getMaxWidthPoints()) || !Double.isFinite(diagram.getMaxHeightPoints())
+                || diagram.getMaxWidthPoints() <= 0 || diagram.getMaxHeightPoints() <= 0) {
+            errors.add("report diagram dimensions must be finite positive numbers at " + path);
         }
     }
 

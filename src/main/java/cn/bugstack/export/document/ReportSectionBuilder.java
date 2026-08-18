@@ -103,6 +103,11 @@ public final class ReportSectionBuilder {
         return add(image);
     }
 
+    /** 追加已解析的图形语义元素。 */
+    public ReportSectionBuilder diagram(ReportDiagram diagram) {
+        return add(diagram);
+    }
+
     /**
      * 追加显式分页符。
      *

@@ -1,0 +1,25 @@
+{
+  "serviceVersion": "1.0",
+  "mcpProtocolVersions": ["2025-11-25", "2025-06-18"],
+  "transports": {
+    "stdio": true,
+    "streamableHttp": {
+      "endpoint": "/mcp",
+      "jsonResponse": true,
+      "sseListener": false,
+      "sessions": true
+    }
+  },
+  "authentication": ["api-key", "jwt-hs256"],
+  "isolation": ["tenant-artifacts", "identity-sessions", "identity-tasks"],
+  "outputFormats": ["DOCX", "PDF", "HTML"],
+  "operations": [
+    "tools/list", "tools/call", "resources/read",
+    "tasks/get", "tasks/result", "tasks/list", "tasks/cancel"
+  ],
+  "operationsEndpoints": [
+    "/health/live", "/health/ready", "/metrics", "/artifacts/{artifactId}"
+  ],
+  "governance": ["template-review", "immutable-schema-version", "explicit-migration"],
+  "security": ["origin-validation", "rate-limit", "concurrency-limit", "artifact-integrity", "audit"]
+}

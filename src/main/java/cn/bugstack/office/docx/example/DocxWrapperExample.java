@@ -65,7 +65,7 @@ public class DocxWrapperExample {
                         .approval("编制", "张三", "2026-07-07")
                         .approval("审核", "李四", "2026-07-07"))
                 .enableHeadingNumbering()
-                .tableOfContents("目录", 3)
+                .tableOfContents("目  录", 3)
                 .header("GJB 438C 软件开发文档")
                 .footer("第 PAGE 页")
                 .registerParagraphStyle(emphasisNote)

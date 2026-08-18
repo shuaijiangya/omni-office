@@ -53,6 +53,7 @@ import com.aspose.words.ParagraphAlignment;
 import com.aspose.words.Paragraph;
 import com.aspose.words.PreferredWidth;
 import com.aspose.words.Run;
+import com.aspose.words.Row;
 import com.aspose.words.Shape;
 import com.aspose.words.StyleIdentifier;
 import com.aspose.words.Style;
@@ -150,7 +151,7 @@ public class AsposeDocxRenderer implements DocxRenderer {
             }
             asposeDocument.updateFields();
             normalizeTableOfContentsEntries(asposeDocument);
-            markPageFieldsDirty(asposeDocument);
+            markDynamicFieldsDirty(asposeDocument);
             asposeDocument.save(output, com.aspose.words.SaveFormat.DOCX);
         } catch (Exception e) {
             throw new DocxRenderException("render docx failed", e);
@@ -336,17 +337,19 @@ public class AsposeDocxRenderer implements DocxRenderer {
     }
 
     /**
-     * 标记页码域需要由文档阅读器重新计算。
+     * 标记目录、目录页码引用和页脚页码域需要由文档阅读器重新计算。
      *
-     * <p>页码位于共享的页脚部分，无法在 XML 中为每个物理页保存不同缓存值。将其标记为
-     * dirty 后，Word/WPS 会在打开文档时依据实际分页显示正确页码，同时避免在未授权
-     * Aspose 环境中强制分页布局可能造成的评估版内容截断。</p>
+     * <p>分页结果会受阅读器实际字体度量影响，目录和页脚中的缓存页码可能与最终分页不同。
+     * 将这些动态域标记为 dirty 后，Word/WPS 可在打开文档时依据实际分页重新计算，同时
+     * 避免在未授权 Aspose 环境中强制分页布局可能造成的评估版内容截断。</p>
      *
      * @param document Aspose 文档对象
      */
-    private void markPageFieldsDirty(Document document) throws Exception {
+    private void markDynamicFieldsDirty(Document document) throws Exception {
         for (Field field : document.getRange().getFields()) {
-            if (field.getType() == FieldType.FIELD_PAGE) {
+            if (field.getType() == FieldType.FIELD_PAGE
+                    || field.getType() == FieldType.FIELD_PAGE_REF
+                    || field.getType() == FieldType.FIELD_TOC) {
                 field.isDirty(true);
             }
         }
@@ -382,6 +385,7 @@ public class AsposeDocxRenderer implements DocxRenderer {
      * @param document 正在生成的 Aspose 文档
      */
     private void configureTableOfContentsStyles(Document document) {
+        ParagraphStyle entryStyle = styleRegistry.getParagraphStyle(DEFAULT_PARAGRAPH_STYLE);
         for (int levelIndex = 0; levelIndex < 9; levelIndex++) {
             Style tableOfContentsStyle = document.getStyles().getByStyleIdentifier(
                     StyleIdentifier.TOC_1 + levelIndex);
@@ -393,6 +397,12 @@ public class AsposeDocxRenderer implements DocxRenderer {
             tableOfContentsStyle.getParagraphFormat().setRightIndent(0);
             tableOfContentsStyle.getParagraphFormat().setFirstLineIndent(0);
             tableOfContentsStyle.getParagraphFormat().setCharacterUnitFirstLineIndent(0);
+            if (entryStyle != null) {
+                tableOfContentsStyle.getFont().setNameAscii(entryStyle.getAsciiFontFamily());
+                tableOfContentsStyle.getFont().setNameFarEast(entryStyle.getFarEastFontFamily());
+                tableOfContentsStyle.getFont().setSize(entryStyle.getFontSize());
+                tableOfContentsStyle.getFont().setBold(false);
+            }
         }
     }
 
@@ -410,10 +420,13 @@ public class AsposeDocxRenderer implements DocxRenderer {
         builder.getParagraphFormat().setCharacterUnitFirstLineIndent(0);
         builder.getParagraphFormat().setOutlineLevel(OutlineLevel.BODY_TEXT);
         builder.getListFormat().removeNumbers();
-        builder.getFont().setNameAscii("Times New Roman");
-        builder.getFont().setNameFarEast("宋体");
-        builder.getFont().setSize(16);
-        builder.getFont().setBold(false);
+        ParagraphStyle titleStyle = styleRegistry.getParagraphStyle("Title");
+        if (titleStyle != null) {
+            builder.getFont().setNameAscii(titleStyle.getAsciiFontFamily());
+            builder.getFont().setNameFarEast(titleStyle.getFarEastFontFamily());
+            builder.getFont().setSize(Math.min(titleStyle.getFontSize(), 16));
+            builder.getFont().setBold(false);
+        }
     }
 
     /**
@@ -436,13 +449,14 @@ public class AsposeDocxRenderer implements DocxRenderer {
     /**
      * 将目录域生成的条目规范为统一的常规字体和标准缩进。
      *
-     * <p>更新目录域时，Word/Aspose 可能复制源标题的黑体、加粗等直接格式。此处仅处理
-     * TOC1 至 TOC9 段落，使目录条目统一为宋体常规字；超链接、点引导线和右侧页码域仍由
-     * 原目录域保留。</p>
+     * <p>更新目录域时，Word/Aspose 可能复制源标题的加粗等直接格式。此处仅处理
+     * TOC1 至 TOC9 段落，使目录条目统一采用当前样式画像的正文字体；超链接、点引导线和
+     * 右侧页码域仍由原目录域保留。</p>
      *
      * @param document 已更新目录域的 Aspose 文档
      */
     private void normalizeTableOfContentsEntries(Document document) {
+        ParagraphStyle entryStyle = styleRegistry.getParagraphStyle(DEFAULT_PARAGRAPH_STYLE);
         NodeCollection paragraphs = document.getChildNodes(NodeType.PARAGRAPH, true);
         for (int index = 0; index < paragraphs.getCount(); index++) {
             Paragraph paragraph = (Paragraph) paragraphs.get(index);
@@ -456,9 +470,11 @@ public class AsposeDocxRenderer implements DocxRenderer {
             paragraph.getParagraphFormat().setFirstLineIndent(0);
             paragraph.getParagraphFormat().setCharacterUnitFirstLineIndent(0);
             for (Run run : paragraph.getRuns()) {
-                run.getFont().setNameAscii("Times New Roman");
-                run.getFont().setNameFarEast("宋体");
-                run.getFont().setSize(10.5);
+                if (entryStyle != null) {
+                    run.getFont().setNameAscii(entryStyle.getAsciiFontFamily());
+                    run.getFont().setNameFarEast(entryStyle.getFarEastFontFamily());
+                    run.getFont().setSize(entryStyle.getFontSize());
+                }
                 run.getFont().setBold(false);
                 run.getFont().setItalic(false);
                 run.getFont().setUnderline(Underline.NONE);
@@ -959,6 +975,12 @@ public class AsposeDocxRenderer implements DocxRenderer {
             builder.endRow();
         }
         Table renderedTable = builder.endTable();
+        if (tableStyle != null && tableStyle.isHeaderBold() && renderedTable.getFirstRow() != null) {
+            renderedTable.getFirstRow().getRowFormat().setHeadingFormat(true);
+        }
+        for (Row row : renderedTable.getRows()) {
+            row.getRowFormat().setAllowBreakAcrossPages(false);
+        }
         if (table.getColumnWidths().length > 0) {
             renderedTable.setAllowAutoFit(false);
         }

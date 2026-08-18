@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0",
+  "diagramTypes": ["USE_CASE", "FLOW", "ER", "SYSTEM_ER", "CLASS", "COMPONENT", "OVERALL_FUNCTION_LOGIC"],
+  "outputs": [
+    { "mediaType": "application/vnd.ms-visio.drawing", "editable": true },
+    { "mediaType": "image/png", "editable": false }
+  ],
+  "wordEmbedModes": ["PREVIEW_IMAGE", "EDITABLE_VISIO"]
+}

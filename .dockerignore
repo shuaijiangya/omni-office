@@ -1,0 +1,8 @@
+target
+.git
+.idea
+*.docx
+*.pdf
+*.vsdx
+*.png
+.env

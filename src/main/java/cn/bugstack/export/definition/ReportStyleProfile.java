@@ -2,6 +2,7 @@ package cn.bugstack.export.definition;
 
 import cn.bugstack.office.docx.style.DefaultStyleProfile;
 import cn.bugstack.office.docx.style.Gjb438cStyleProfile;
+import cn.bugstack.office.docx.style.BusinessBriefStyleProfile;
 import cn.bugstack.office.docx.style.StyleProfile;
 import cn.bugstack.office.docx.style.StyleRegistry;
 
@@ -16,6 +17,9 @@ public enum ReportStyleProfile implements StyleProfile {
 
     /** 通用技术文档样式。 */
     DEFAULT(DefaultStyleProfile.standard()),
+
+    /** 中英文技术简报样式。 */
+    BUSINESS_BRIEF(BusinessBriefStyleProfile.standard()),
 
     /** GJB 438C 软件开发文档样式。 */
     GJB_438C(Gjb438cStyleProfile.standard());

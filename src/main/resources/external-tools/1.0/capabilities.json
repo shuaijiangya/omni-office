@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1.0",
+  "sharedApplication": "cn.bugstack.application.external.ExternalDocumentToolApplication",
+  "functionCallingAdapter": "cn.bugstack.application.external.function.FunctionCallingDocumentAdapter",
+  "mcpServer": {
+    "mainClass": "cn.bugstack.application.external.mcp.McpStdioServerMain",
+    "transport": "stdio",
+    "protocolVersions": ["2025-11-25", "2025-06-18"],
+    "capabilities": ["tools", "resources"]
+  },
+  "tools": [
+    {
+      "name": "omni_templates_list",
+      "effect": "READ_ONLY",
+      "output": "registered template descriptors"
+    },
+    {
+      "name": "omni_template_schema",
+      "effect": "READ_ONLY",
+      "requires": ["templateId", "version"],
+      "output": "template data JSON Schema"
+    },
+    {
+      "name": "omni_template_export",
+      "effect": "CREATE_ARTIFACT",
+      "requires": ["templateId", "version", "data", "outputFormat"],
+      "output": "DOCX, PDF or HTML resource reference"
+    },
+    {
+      "name": "omni_document_export",
+      "effect": "CREATE_ARTIFACT",
+      "input": "DocumentSpec@1.0 plus outputFormat",
+      "output": "DOCX, PDF or HTML resource reference"
+    },
+    {
+      "name": "omni_diagram_generate",
+      "effect": "CREATE_ARTIFACT",
+      "input": "DiagramSpec@1.0",
+      "output": "diagramArtifactId plus VSDX and PNG resource references"
+    }
+  ],
+  "artifactBoundary": {
+    "resourceUriTemplate": "omni-office://artifacts/{artifactId}",
+    "serverPathsExposed": false,
+    "callerSuppliedPathsAllowed": false,
+    "sha256Included": true,
+    "maximumArtifactBytes": 104857600
+  },
+  "validation": {
+    "documentSpec": true,
+    "diagramSpec": true,
+    "templateDataSchema": true,
+    "compiledReportSemantics": true
+  }
+}

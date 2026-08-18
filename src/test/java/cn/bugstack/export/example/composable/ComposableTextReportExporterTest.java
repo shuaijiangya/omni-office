@@ -90,7 +90,7 @@ class ComposableTextReportExporterTest {
         assertTrue(document.getText().contains("测试评估对象"));
         assertTrue(document.getText().contains("V2.0"));
         assertTrue(coverSection.getText().contains("动态组合报告"));
-        assertTrue(tableOfContentsSection.getText().contains("目录"));
+        assertTrue(tableOfContentsSection.getText().replace(" ", "").contains("目录"));
         assertEquals(0, coverSection.getHeadersFooters().getCount());
         HeaderFooter tableOfContentsFooter = tableOfContentsSection.getHeadersFooters()
                 .getByHeaderFooterType(HeaderFooterType.FOOTER_PRIMARY);

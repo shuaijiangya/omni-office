@@ -1,0 +1,174 @@
+{
+  "schemaVersion": "1.0",
+  "templateId": "omni.office.ai-demo",
+  "version": "1.0.0",
+  "name": "Omni Office AI 能力演示模板",
+  "description": "面向本地小参数模型的紧凑技术简报模板。",
+  "dataSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "executiveSummary",
+      "architectureOverview",
+      "implementedCapabilities",
+      "securityBoundaries",
+      "nextSteps"
+    ],
+    "properties": {
+      "executiveSummary": {
+        "type": "string",
+        "description": "使用简体中文概述演示目标，不得输出英文句子。",
+        "enum": [
+          "本报告验证本地 qwen3.5:2b 填充受控数据，并通过 DocumentTemplate、DocumentSpec 与统一 export 输出 Word 和 HTML；M1 至 M10 的生成、开放、治理、安全及部署链路均已落地。"
+        ],
+        "minLength": 30,
+        "maxLength": 800
+      },
+      "architectureOverview": {
+        "type": "string",
+        "description": "使用简体中文说明从 AI 数据到 DocumentSpec 再到 Word 的真实链路，不得输出英文句子。",
+        "enum": [
+          "处理顺序为用户指令、Ollama JSON、JSON Schema、DocumentTemplate、DocumentSpec 与安全校验、统一 export；同一语义内容可输出 Word、PDF 和 HTML，DiagramSpec 可生成图形工件并写入 Word。"
+        ],
+        "minLength": 30,
+        "maxLength": 1000
+      },
+      "implementedCapabilities": {
+        "type": "array",
+        "description": "从受控能力清单中选择九项，每项只出现一次。",
+        "minItems": 9,
+        "maxItems": 9,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "enum": [
+            "DocumentSpec 支持章节、段落、列表、表格和图形等通用文档结构。",
+            "DocumentTemplate 使用 JSON Schema 校验业务数据并映射为 DocumentSpec。",
+            "内部 AI 明确区分自由 DocumentSpec 生成与模板业务数据填充两种模式。",
+            "DiagramSpec 生成 VSDX、PNG 与 OLE 工件，并由导出层写入 Word。",
+            "Function Calling 与 MCP 复用同一外部工具门面，并返回受控资源 URI。",
+            "Streamable HTTP 支持 API Key、JWT、Origin、限流、会话和租户隔离。",
+            "模板版本支持草稿、提审、发布与驳回，协议 Schema 支持兼容检查和显式迁移。",
+            "AI 调用支持隐私友好追踪、自动评测和独立人工审批后导出。",
+            "产物支持过期清理、完整性与安全扫描、对象存储适配、审计和异步任务。"
+          ]
+        }
+      },
+      "securityBoundaries": {
+        "type": "array",
+        "description": "从受控边界清单中选择五项，每项只出现一次。",
+        "minItems": 5,
+        "maxItems": 5,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "enum": [
+            "模型输出均不受信，必须通过 JSON Schema、DocumentSpec 与 AI 安全边界校验。",
+            "工件路径必须位于受信目录内，且结构数量、文本长度和协议字段受限。",
+            "Function Calling 与 MCP 均不能绕过模板、DocumentSpec、DiagramSpec 和 export 校验。",
+            "HTTP 会话和异步任务绑定认证身份，工件按租户隔离且不暴露服务器路径。",
+            "ClamAV 和公网 OAuth 属于部署集成项，只有显式配置后才能声明对应防护已启用。"
+          ]
+        }
+      },
+      "nextSteps": {
+        "type": "array",
+        "description": "从受控路线清单中选择三项，每项只出现一次。",
+        "minItems": 3,
+        "maxItems": 3,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "enum": [
+            "生产环境对接企业 OAuth 与短期访问令牌，并配置签发方和受众校验。",
+            "生产环境接入 S3、OSS 或 MinIO 以及 ClamAV，并设置符合业务要求的保留期。",
+            "持续扩充真实业务评测集、迁移用例和容量基线，并把指标接入统一观测平台。"
+          ]
+        }
+      }
+    }
+  },
+  "documentTemplate": {
+    "schemaVersion": "1.0",
+    "metadata": {
+      "title": "Omni Office AI 文档生成能力演示报告",
+      "author": "Omni Office",
+      "subject": "AI 与 Word 结构化生成链路验证"
+    },
+    "layout": {
+      "styleProfile": "BUSINESS_BRIEF",
+      "headingNumberingEnabled": true,
+      "bodyTitleEnabled": true,
+      "tableOfContentsDepth": 3,
+      "headerText": "Omni Office AI Demo",
+      "pageNumberFooterEnabled": true,
+      "bodyPageNumberStart": 1
+    },
+    "sections": [
+      {
+        "title": "演示目标",
+        "blocks": [
+          { "type": "paragraph", "text": "{{executiveSummary}}" }
+        ]
+      },
+      {
+        "title": "总体架构",
+        "blocks": [
+          { "type": "paragraph", "text": "{{architectureOverview}}" }
+        ]
+      },
+      {
+        "title": "已实现能力",
+        "blocks": [
+          {
+            "type": "bulletList",
+            "items": [
+              { "$each": "implementedCapabilities", "$as": "capability", "$template": "{{capability}}" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "M6 至 M10 验收矩阵",
+        "blocks": [
+          {
+            "type": "table",
+            "headers": ["里程碑", "状态", "主要结果"],
+            "rows": [
+              ["M6", "已完成", "HTTP MCP、双鉴权、会话、多租户、下载与限流"],
+              ["M7", "已完成", "Schema 兼容迁移、模板审核发布和外部客户端示例"],
+              ["M8", "已完成", "AI 追踪、结构化评测和四眼人工审核"],
+              ["M9", "已完成", "生命周期、对象存储、安全扫描、审计和异步任务"],
+              ["M10", "已完成", "HTML、健康检查、指标、Docker 和 Compose" ]
+            ],
+            "columnWidths": [70, 80, 350],
+            "styleName": "TableHeader"
+          }
+        ]
+      },
+      {
+        "title": "安全边界",
+        "blocks": [
+          {
+            "type": "bulletList",
+            "items": [
+              { "$each": "securityBoundaries", "$as": "boundary", "$template": "{{boundary}}" }
+            ]
+          }
+        ]
+      },
+      {
+        "title": "生产化建议",
+        "blocks": [
+          {
+            "type": "numberedList",
+            "items": [
+              { "$each": "nextSteps", "$as": "step", "$template": "{{step}}" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -5,6 +5,7 @@ lib/
 # Aspose license files must never be committed
 *.lic
 *.license
+.env
 
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/

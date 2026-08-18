@@ -9,5 +9,8 @@ public enum ReportOutputFormat {
     DOCX,
 
     /** PDF 文档。 */
-    PDF
+    PDF,
+
+    /** 单文件 HTML 文档，图片以内联 Base64 形式保存。 */
+    HTML
 }

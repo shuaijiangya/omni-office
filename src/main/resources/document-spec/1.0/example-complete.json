@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "metadata": {
+    "title": "DocumentSpec 完整能力示例",
+    "author": "Omni Office",
+    "subject": "通用文档协议"
+  },
+  "layout": {
+    "styleProfile": "DEFAULT",
+    "headingNumberingEnabled": true,
+    "bodyTitleEnabled": true,
+    "tableOfContentsDepth": 3,
+    "headerText": "DocumentSpec v1",
+    "pageNumberFooterEnabled": true,
+    "bodyPageNumberStart": 1
+  },
+  "sections": [
+    {
+      "title": "结构化内容",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "styleName": "BodyText",
+          "text": "DocumentSpec 允许调用方按受控协议描述文档结构。"
+        },
+        {
+          "type": "bulletList",
+          "items": ["段落", "列表", "表格", "图片", "子章节"]
+        },
+        {
+          "type": "numberedList",
+          "items": ["协议校验", "语义编译", "DOCX/PDF 渲染"]
+        },
+        {
+          "type": "table",
+          "styleName": "TableHeader",
+          "caption": "DocumentSpec 块类型",
+          "captionAutoNumbered": true,
+          "headers": ["类型", "用途"],
+          "columnWidths": [160, 260],
+          "rows": [
+            ["paragraph", "普通正文段落"],
+            ["table", "结构化表格"],
+            ["subsection", "递归子章节"]
+          ]
+        },
+        {
+          "type": "subsection",
+          "title": "递归章节",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "text": "子章节继续使用相同的块协议。"
+            }
+          ]
+        },
+        {
+          "type": "pageBreak"
+        },
+        {
+          "type": "paragraph",
+          "text": "分页后的内容。"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "project": {
+    "name": "无人系统",
+    "author": "评估分析组"
+  },
+  "summary": "本报告根据结构化业务数据生成，用于验证系统能力与关键风险。",
+  "capabilities": [
+    "任务规划",
+    "态势感知",
+    "协同控制"
+  ],
+  "risks": [
+    { "level": "高", "description": "复杂电磁环境下通信链路可能不稳定。" },
+    { "level": "中", "description": "跨系统数据格式需要进一步统一。" }
+  ],
+  "includeAppendix": true,
+  "contact": {
+    "name": "张三"
+  }
+}

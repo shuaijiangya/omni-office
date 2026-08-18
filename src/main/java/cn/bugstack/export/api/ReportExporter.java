@@ -25,7 +25,7 @@ public interface ReportExporter {
      *
      * @param request 报告请求
      * @param <T> 报告入口业务数据类型
-     * @return 生成后的 docx 或 PDF 字节数组
+     * @return 生成后的 DOCX、PDF 或 HTML 字节数组
      */
     <T> byte[] exportToBytes(ReportRequest<T> request);
 }

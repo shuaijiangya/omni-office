@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "clientSpi": "cn.bugstack.application.ai.StructuredAiClient",
+  "providerBound": false,
+  "modes": [
+    {
+      "operation": "generate_document_spec",
+      "mode": "FREEFORM_DOCUMENT",
+      "output": "DocumentSpec@1.0",
+      "fallback": false,
+      "aiImageSourcesAllowed": false,
+      "artifactReferencesAllowed": false,
+      "inlineDiagramRequiresArtifactCapability": true
+    },
+    {
+      "operation": "fill_document_template",
+      "mode": "DOCUMENT_TEMPLATE",
+      "output": "registered template data schema",
+      "requires": ["templateId", "version"],
+      "fallback": false
+    }
+  ],
+  "validation": {
+    "jsonOnly": true,
+    "localSchemaValidation": true,
+    "documentSpecValidation": true,
+    "defaultMaxAttempts": 2,
+    "reviewBeforeExportSupported": true
+  }
+}

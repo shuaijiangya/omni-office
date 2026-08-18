@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.0",
+  "metadata": {
+    "title": "系统评估报告",
+    "author": "评估分析组",
+    "subject": "系统综合评估"
+  },
+  "layout": {
+    "styleProfile": "GJB_438C",
+    "headingNumberingEnabled": true,
+    "bodyTitleEnabled": true,
+    "tableOfContentsDepth": 3,
+    "pageNumberFooterEnabled": true,
+    "bodyPageNumberStart": 1
+  },
+  "sections": [
+    {
+      "title": "评估背景",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "本报告围绕系统能力、任务适应性和关键风险开展综合评估。"
+        }
+      ]
+    }
+  ]
+}

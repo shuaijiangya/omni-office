@@ -16,7 +16,7 @@ public class DocumentNode implements DocxNode {
     /** 是否生成目录域。 */
     private boolean tableOfContentsEnabled;
     /** 目录显示标题。 */
-    private String tableOfContentsTitle = "目录";
+    private String tableOfContentsTitle = "目  录";
     /** 目录收录的最大标题层级。 */
     private int tableOfContentsDepth = 3;
     /** 文档页眉文本。 */
