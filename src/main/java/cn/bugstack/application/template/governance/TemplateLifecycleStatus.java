@@ -5,5 +5,6 @@ public enum TemplateLifecycleStatus {
     DRAFT,
     IN_REVIEW,
     PUBLISHED,
-    REJECTED
+    REJECTED,
+    RETIRED
 }

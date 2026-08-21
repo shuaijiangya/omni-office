@@ -35,6 +35,13 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
+    /**
+     * 创建对象存储工件库。
+     *
+     * @param storage 对象存储适配器
+     * @param cacheRoot 受控本地读取缓存目录
+     * @param retention 工件保留时间
+     */
     public ObjectStorageExternalArtifactStore(ArtifactObjectStorage storage, Path cacheRoot,
                                               Duration retention) {
         this(storage, cacheRoot, retention, new BasicArtifactSecurityScanner(), Clock.systemUTC());
@@ -167,14 +174,24 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
         } catch (Exception e) { throw new IllegalStateException("SHA-256 is not available", e); }
     }
 
+    /** 对象存储中持久化的工件元数据。 */
     public static final class Metadata {
+        /** 工件 UUID。 */
         public String id;
+        /** 下载文件名。 */
         public String fileName;
+        /** MIME 类型。 */
         public String mediaType;
+        /** 内容字节数。 */
         public long size;
+        /** 内容 SHA-256 摘要。 */
         public String sha256;
+        /** 创建时间。 */
         public Instant createdAt;
+        /** 过期时间。 */
         public Instant expiresAt;
+
+        /** 供 Jackson 反序列化使用的构造器。 */
         public Metadata() { }
         Metadata(String id, String fileName, String mediaType, long size, String sha256,
                  Instant createdAt, Instant expiresAt) {

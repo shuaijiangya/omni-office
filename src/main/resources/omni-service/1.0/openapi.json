@@ -1,0 +1,348 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Omni Office Generation API",
+    "version": "1.0.0",
+    "description": "Tenant-isolated asynchronous document generation jobs. Existing export, Function Calling and MCP adapters share the same generation core."
+  },
+  "servers": [{"url": "/"}],
+  "security": [{"bearerAuth": []}, {"apiKeyAuth": []}],
+  "paths": {
+    "/.well-known/oauth-protected-resource": {
+      "get": {
+        "operationId": "getOAuthProtectedResourceMetadata",
+        "security": [],
+        "responses": {"200": {"description": "OAuth 2.0 protected resource metadata"}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/document-specs/validate": {
+      "post": {
+        "operationId": "validateDocumentSpec",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},
+        "responses": {
+          "200": {"description": "DocumentSpec is valid"},
+          "422": {"$ref": "#/components/responses/ValidationProblem"}
+        }
+      }
+    },
+    "/v1/templates/{templateId}/versions/{templateVersion}/validate-data": {
+      "post": {
+        "operationId": "validateTemplateData",
+        "parameters": [
+          {"name": "templateId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "templateVersion", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},
+        "responses": {
+          "200": {"description": "Template data and expanded DocumentSpec are valid"},
+          "422": {"$ref": "#/components/responses/ValidationProblem"}
+        }
+      }
+    },
+    "/v1/generation-jobs": {
+      "post": {
+        "operationId": "submitGenerationJob",
+        "parameters": [
+          {"name": "Idempotency-Key", "in": "header", "required": false, "schema": {"type": "string", "maxLength": 128}},
+          {"name": "X-Correlation-Id", "in": "header", "required": false, "schema": {"type": "string", "maxLength": 128}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationRequest"}}}
+        },
+        "responses": {
+          "202": {"description": "Accepted or replayed idempotent job", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationJob"}}}},
+          "400": {"$ref": "#/components/responses/Problem"},
+          "401": {"$ref": "#/components/responses/Problem"},
+          "409": {"$ref": "#/components/responses/Problem"},
+          "429": {"$ref": "#/components/responses/Problem"}
+        }
+      },
+      "get": {
+        "operationId": "listGenerationJobs",
+        "parameters": [
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}},
+          {"name": "status", "in": "query", "schema": {"$ref": "#/components/schemas/GenerationJobStatus"}},
+          {"name": "cursor", "in": "query", "schema": {"type": "string"}, "description": "Opaque stable pagination cursor returned as nextCursor"}
+        ],
+        "responses": {"200": {"description": "Tenant generation jobs", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationJobPage"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/generation-jobs/{jobId}": {
+      "get": {
+        "operationId": "getGenerationJob",
+        "parameters": [{"$ref": "#/components/parameters/JobId"}],
+        "responses": {"200": {"description": "Generation job", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationJob"}}}}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/generation-jobs/{jobId}/cancel": {
+      "post": {
+        "operationId": "cancelGenerationJob",
+        "parameters": [{"$ref": "#/components/parameters/JobId"}],
+        "responses": {"200": {"description": "Cancelled job", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationJob"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/generation-jobs/{jobId}/artifacts": {
+      "get": {
+        "operationId": "listGenerationArtifacts",
+        "parameters": [{"$ref": "#/components/parameters/JobId"}],
+        "responses": {"200": {"description": "Generated artifacts"}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/webhook-deliveries": {
+      "get": {
+        "operationId": "listWebhookDeliveries",
+        "parameters": [{"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}}],
+        "responses": {
+          "200": {"description": "Tenant webhook delivery audit records"},
+          "404": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
+    "/v1/admin/templates": {
+      "get": {
+        "operationId": "listTemplateRevisions",
+        "parameters": [
+          {"name": "status", "in": "query", "schema": {"$ref": "#/components/schemas/TemplateStatus"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}}
+        ],
+        "responses": {"200": {"description": "Tenant template revisions"}}
+      },
+      "post": {
+        "operationId": "createTemplateDraft",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object"}}}},
+        "responses": {
+          "201": {"description": "Created template draft", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateRevision"}}}},
+          "409": {"$ref": "#/components/responses/Problem"},
+          "422": {"$ref": "#/components/responses/ValidationProblem"}
+        }
+      }
+    },
+    "/v1/admin/templates/{templateId}/versions/{templateVersion}": {
+      "get": {
+        "operationId": "getTemplateRevision",
+        "parameters": [
+          {"$ref": "#/components/parameters/TemplateId"},
+          {"$ref": "#/components/parameters/TemplateVersion"}
+        ],
+        "responses": {
+          "200": {"description": "Template revision", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateRevision"}}}},
+          "404": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
+    "/v1/admin/templates/{templateId}/versions/{templateVersion}/submit": {
+      "post": {
+        "operationId": "submitTemplateReview",
+        "parameters": [{"$ref": "#/components/parameters/TemplateId"}, {"$ref": "#/components/parameters/TemplateVersion"}],
+        "responses": {"200": {"description": "Template submitted for review"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/admin/templates/{templateId}/versions/{templateVersion}/approve": {
+      "post": {
+        "operationId": "approveTemplateRevision",
+        "parameters": [{"$ref": "#/components/parameters/TemplateId"}, {"$ref": "#/components/parameters/TemplateVersion"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateAction"}}}},
+        "responses": {"200": {"description": "Published template revision"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/admin/templates/{templateId}/versions/{templateVersion}/reject": {
+      "post": {
+        "operationId": "rejectTemplateRevision",
+        "parameters": [{"$ref": "#/components/parameters/TemplateId"}, {"$ref": "#/components/parameters/TemplateVersion"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RequiredTemplateAction"}}}},
+        "responses": {"200": {"description": "Rejected template revision"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/admin/templates/{templateId}/versions/{templateVersion}/retire": {
+      "post": {
+        "operationId": "retireTemplateRevision",
+        "parameters": [{"$ref": "#/components/parameters/TemplateId"}, {"$ref": "#/components/parameters/TemplateVersion"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RequiredTemplateAction"}}}},
+        "responses": {"200": {"description": "Retired template revision"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/admin/templates/{templateId}/compare": {
+      "get": {
+        "operationId": "compareTemplateSchemas",
+        "parameters": [
+          {"$ref": "#/components/parameters/TemplateId"},
+          {"name": "fromVersion", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "toVersion", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "Backward compatibility result"}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/admin/operations/summary": {
+      "get": {
+        "operationId": "getTenantOperationsSummary",
+        "responses": {
+          "200": {"description": "Tenant-scoped generation and webhook operational summary"},
+          "401": {"$ref": "#/components/responses/Problem"},
+          "403": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
+    "/artifacts/{artifactId}": {
+      "get": {
+        "operationId": "downloadArtifact",
+        "parameters": [{"name": "artifactId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "responses": {"200": {"description": "Generated binary artifact"}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+      "apiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+    },
+    "parameters": {
+      "JobId": {"name": "jobId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      "TemplateId": {"name": "templateId", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"}},
+      "TemplateVersion": {"name": "templateVersion", "in": "path", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"}}
+    },
+    "responses": {
+      "Problem": {"description": "Problem response", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Problem"}}}},
+      "ValidationProblem": {"description": "Validation failed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ValidationProblem"}}}}
+    },
+    "schemas": {
+      "GenerationRequest": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/DocumentSpecGenerationRequest"},
+          {"$ref": "#/components/schemas/TemplateGenerationRequest"}
+        ]
+      },
+      "DocumentSpecGenerationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode", "outputFormat", "documentSpec"],
+        "properties": {
+          "mode": {"type": "string", "enum": ["DOCUMENT_SPEC"]},
+          "outputFormat": {"$ref": "#/components/schemas/OutputFormat"},
+          "documentSpec": {"type": "object"}
+          ,"maxAttempts": {"type": "integer", "minimum": 1, "maximum": 3, "default": 2},
+          "webhookId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$", "description": "Pre-registered tenant webhook identifier; caller-supplied URLs are forbidden"}
+        }
+      },
+      "TemplateGenerationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode", "outputFormat", "templateId", "templateVersion", "data"],
+        "properties": {
+          "mode": {"type": "string", "enum": ["TEMPLATE_DATA"]},
+          "outputFormat": {"$ref": "#/components/schemas/OutputFormat"},
+          "templateId": {"type": "string", "minLength": 1},
+          "templateVersion": {"type": "string", "minLength": 1},
+          "data": {"type": "object"}
+          ,"maxAttempts": {"type": "integer", "minimum": 1, "maximum": 3, "default": 2},
+          "webhookId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$", "description": "Pre-registered tenant webhook identifier; caller-supplied URLs are forbidden"}
+        }
+      },
+      "OutputFormat": {"type": "string", "enum": ["DOCX", "PDF", "HTML"]},
+      "TemplateStatus": {"type": "string", "enum": ["DRAFT", "IN_REVIEW", "PUBLISHED", "REJECTED", "RETIRED"]},
+      "TemplateRevision": {
+        "type": "object",
+        "required": ["template", "status", "createdBy", "createdAt", "updatedAt"],
+        "properties": {
+          "template": {"type": "object"},
+          "status": {"$ref": "#/components/schemas/TemplateStatus"},
+          "createdBy": {"type": "string"},
+          "reviewedBy": {"type": "string"},
+          "reviewComment": {"type": "string"},
+          "createdAt": {"type": "string", "format": "date-time"},
+          "updatedAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "TemplateAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"comment": {"type": "string", "maxLength": 2000}}
+      },
+      "RequiredTemplateAction": {
+        "allOf": [
+          {"$ref": "#/components/schemas/TemplateAction"},
+          {"type": "object", "required": ["comment"]}
+        ]
+      },
+      "GenerationJob": {
+        "type": "object",
+        "required": ["jobId", "tenantId", "principalId", "correlationId", "mode", "status", "attemptCount", "createdAt", "updatedAt", "artifacts"],
+        "properties": {
+          "jobId": {"type": "string", "format": "uuid"},
+          "tenantId": {"type": "string"},
+          "principalId": {"type": "string"},
+          "correlationId": {"type": "string"},
+          "mode": {"type": "string", "enum": ["TEMPLATE_DATA", "DOCUMENT_SPEC"]},
+          "status": {"$ref": "#/components/schemas/GenerationJobStatus"},
+          "attemptCount": {"type": "integer", "minimum": 0},
+          "maxAttempts": {"type": "integer", "minimum": 1, "maximum": 3},
+          "webhookId": {"type": "string"},
+          "terminalEventId": {"type": "string", "format": "uuid"},
+          "terminalEventQueuedAt": {"type": "string", "format": "date-time"},
+          "errorCode": {"type": "string"},
+          "errorMessage": {"type": "string"},
+          "createdAt": {"type": "string", "format": "date-time"},
+          "startedAt": {"type": "string", "format": "date-time"},
+          "completedAt": {"type": "string", "format": "date-time"},
+          "updatedAt": {"type": "string", "format": "date-time"},
+          "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}
+        }
+      },
+      "GenerationJobStatus": {"type": "string", "enum": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]},
+      "GenerationJobPage": {
+        "type": "object",
+        "required": ["jobs", "limit"],
+        "properties": {
+          "jobs": {"type": "array", "items": {"$ref": "#/components/schemas/GenerationJob"}},
+          "limit": {"type": "integer"},
+          "nextCursor": {"type": "string"}
+        }
+      },
+      "Artifact": {
+        "type": "object",
+        "required": ["artifactId", "resourceUri", "fileName", "mediaType", "size", "sha256"],
+        "properties": {
+          "artifactId": {"type": "string", "format": "uuid"},
+          "resourceUri": {"type": "string"},
+          "fileName": {"type": "string"},
+          "mediaType": {"type": "string"},
+          "size": {"type": "integer", "format": "int64"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "createdAt": {"type": "string", "format": "date-time"},
+          "expiresAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "required": ["status", "code", "detail"],
+        "properties": {
+          "status": {"type": "integer"},
+          "code": {"type": "string"},
+          "detail": {"type": "string"}
+        }
+      },
+      "ValidationProblem": {
+        "allOf": [
+          {"$ref": "#/components/schemas/Problem"},
+          {
+            "type": "object",
+            "properties": {
+              "violations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["path", "code", "message"],
+                  "properties": {
+                    "path": {"type": "string"},
+                    "code": {"type": "string"},
+                    "message": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

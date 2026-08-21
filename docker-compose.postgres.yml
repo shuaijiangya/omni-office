@@ -1,0 +1,28 @@
+services:
+  omni-office:
+    environment:
+      OMNI_OFFICE_DATABASE_URL: jdbc:postgresql://postgres:5432/omni_office
+      OMNI_OFFICE_DATABASE_USERNAME: omni_office
+      OMNI_OFFICE_DATABASE_PASSWORD: ${OMNI_OFFICE_DATABASE_PASSWORD:?database password is required}
+      OMNI_OFFICE_DATABASE_POOL_SIZE: ${OMNI_OFFICE_DATABASE_POOL_SIZE:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18.4-alpine
+    environment:
+      POSTGRES_DB: omni_office
+      POSTGRES_USER: omni_office
+      POSTGRES_PASSWORD: ${OMNI_OFFICE_DATABASE_PASSWORD:?database password is required}
+    volumes:
+      - omni-office-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omni_office -d omni_office"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  omni-office-postgres:

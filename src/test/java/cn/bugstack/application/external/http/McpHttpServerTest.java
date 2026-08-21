@@ -88,11 +88,47 @@ class McpHttpServerTest {
                     .toLowerCase().contains("<html"));
             assertEquals(404, get(download, "tenant-b-key").statusCode());
 
-            assertEquals(200, client.send(HttpRequest.newBuilder(endpoint.resolve("/health/ready"))
-                    .GET().build(), HttpResponse.BodyHandlers.discarding()).statusCode());
+            HttpResponse<String> readiness = client.send(HttpRequest.newBuilder(
+                            endpoint.resolve("/health/ready")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, readiness.statusCode());
+            JsonNode readinessJson = mapper.readTree(readiness.body());
+            assertTrue(readinessJson.path("checks").path("dataDirectory").asBoolean());
+            assertTrue(readinessJson.path("checks").path("generationRepository").asBoolean());
+            assertTrue(readinessJson.path("checks").path("artifactStorage").asBoolean());
             String metrics = client.send(HttpRequest.newBuilder(endpoint.resolve("/metrics"))
                     .GET().build(), HttpResponse.BodyHandlers.ofString()).body();
             assertTrue(metrics.contains("omni_office_artifact_downloads_total 1"));
+            assertTrue(metrics.contains("omni_office_http_route_requests_total{route=\"artifacts\",status=\"200\"} 1"));
+            assertTrue(metrics.contains("omni_office_http_route_duration_seconds_count{route=\"mcp\"}"));
+            assertTrue(metrics.contains("omni_office_uptime_seconds"));
+        }
+    }
+
+    @Test
+    void exposesOAuthProtectedResourceMetadataAndChallenge() throws Exception {
+        Map<String, RequestIdentity> keys = new LinkedHashMap<>();
+        keys.put("tenant-a-key", identity("tenant-a", "alice"));
+        URI authorizationServer = URI.create("https://identity.example.com");
+        URI resource = URI.create("https://documents.example.com");
+        McpHttpServerConfig config = new McpHttpServerConfig(new InetSocketAddress("127.0.0.1", 0),
+                Files.createTempDirectory("oauth-resource-http"), Collections.emptySet(), 2 * 1024 * 1024,
+                500, 4, Duration.ofSeconds(30), Duration.ofMinutes(5), null,
+                authorizationServer, resource);
+        try (McpHttpServer server = new McpHttpServer(config, new StaticApiKeyAuthenticator(keys))) {
+            server.start();
+            URI base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
+            HttpResponse<byte[]> metadata = get(base.resolve("/.well-known/oauth-protected-resource"), null);
+            assertEquals(200, metadata.statusCode());
+            JsonNode value = mapper.readTree(metadata.body());
+            assertEquals(resource.toString(), value.path("resource").asText());
+            assertEquals(authorizationServer.toString(), value.path("authorization_servers").path(0).asText());
+
+            HttpResponse<byte[]> unauthorized = get(base.resolve("/v1/generation-jobs"), null);
+            assertEquals(401, unauthorized.statusCode());
+            assertTrue(unauthorized.headers().firstValue("WWW-Authenticate").orElse("")
+                    .contains("resource_metadata=\"https://documents.example.com/"
+                            + ".well-known/oauth-protected-resource\""));
         }
     }
 
@@ -120,7 +156,9 @@ class McpHttpServerTest {
     }
 
     private HttpResponse<byte[]> get(URI endpoint, String key) throws Exception {
-        return client.send(HttpRequest.newBuilder(endpoint).header("X-API-Key", key).GET().build(),
+        HttpRequest.Builder request = HttpRequest.newBuilder(endpoint);
+        if (key != null) request.header("X-API-Key", key);
+        return client.send(request.GET().build(),
                 HttpResponse.BodyHandlers.ofByteArray());
     }
 

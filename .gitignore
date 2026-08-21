@@ -6,6 +6,8 @@ lib/
 *.lic
 *.license
 .env
+webhook-config.json
+quota-config.json
 
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/

@@ -61,6 +61,8 @@ DocumentSpec、DiagramSpec、工件目录和统一 export 的校验。
 | Jackson | 严格 JSON 编解码、协议消息和持久化元数据 |
 | NetworkNT JSON Schema Validator | 模板业务数据和协议 Schema 校验 |
 | JDK HttpServer/HttpClient | 独立 MCP HTTP 服务、Ollama 与客户端适配 |
+| PostgreSQL/Flyway/HikariCP | 多实例任务、幂等键、事务型 Webhook Outbox 与连接池 |
+| AWS SDK for Java 2.x | S3、MinIO 及兼容对象存储适配 |
 | JUnit Jupiter | 单元测试和文档结构回归测试，版本 5.10.2 |
 | SVG/XML | 不依赖 Word 的用例图、流程图和 ER 图输出 |
 
@@ -435,8 +437,8 @@ MCP 生命周期、工具结果和二进制资源格式分别遵循官方
 
 ### 部署 MCP Streamable HTTP 服务
 
-M6 在同一个 `ExternalDocumentToolApplication` 之上增加独立 HTTP 服务，不复制工具业务逻辑。
-服务默认绑定 `127.0.0.1`，同时提供 API Key 与 HS256 JWT 验证、Origin 校验、请求体上限、
+M6/M11 在同一个 `ExternalDocumentToolApplication` 之上提供独立 HTTP 服务，不复制工具业务逻辑。
+服务默认绑定 `127.0.0.1`，同时提供 API Key、HS256 JWT 与 OIDC Discovery/JWKS RS256 验证、Origin 校验、请求体上限、
 身份限流、并发限制、超时、会话过期以及租户目录隔离。启动本地服务：
 
 ```bash
@@ -455,6 +457,18 @@ export OMNI_OFFICE_JWT_ISSUER='https://identity.example.com'
 export OMNI_OFFICE_JWT_AUDIENCE='omni-office'
 ```
 
+生产环境推荐使用企业 OIDC/JWKS。服务启动时读取 Discovery，严格校验返回的 issuer，使用 `jwks_uri` 中
+至少 2048 位 RSA 公钥验证 RS256，并在缓存过期或遇到未知 `kid` 时刷新以支持密钥轮换：
+
+```bash
+export OMNI_OFFICE_OIDC_ISSUER='https://identity.example.com'
+export OMNI_OFFICE_OIDC_AUDIENCE='omni-office'
+export OMNI_OFFICE_RESOURCE_IDENTIFIER='https://documents.example.com'
+```
+
+访问令牌必须包含匹配的 `iss`、`aud`、未来的 `exp`、`sub`、`tenant` 和 `scope`；可选 `nbf`、`iat`
+同样会校验。生产 issuer、JWKS 和资源标识必须使用 HTTPS，HTTP 仅允许回环地址用于自动化测试。
+
 服务端点如下：
 
 | 端点 | 用途 |
@@ -466,6 +480,7 @@ export OMNI_OFFICE_JWT_AUDIENCE='omni-office'
 | `GET /health/live` | 进程存活检查 |
 | `GET /health/ready` | 数据目录可写就绪检查 |
 | `GET /metrics` | Prometheus 文本格式的请求、错误、下载与会话指标 |
+| `GET /.well-known/oauth-protected-resource` | 配置 OIDC 时返回 OAuth Protected Resource Metadata |
 
 客户端必须在 `Accept` 中同时声明 `application/json` 和 `text/event-stream`。服务校验所有带
 `Origin` 的请求；如果浏览器来源未列入 `OMNI_OFFICE_ALLOWED_ORIGINS`，会返回 403。命令行客户端
@@ -477,9 +492,10 @@ OMNI_OFFICE_API_KEY=local-dev-key ./scripts/mcp-http-curl-example.sh
 ```
 
 HTTP 身份同时绑定会话和异步任务。租户 A 生成的资源 ID 即使泄漏，租户 B 也无法下载。
-HS256 JWT 适合接入已有签发系统；本项目不是 OAuth 授权服务器。面向不受信网络部署时，应由企业
-OAuth 2.1/OIDC 授权服务器签发和治理访问令牌，并按官方
-[Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) 规范补充
+HS256 JWT 适合本地或迁移期；本项目不是 OAuth 授权服务器。面向不受信网络部署时，由企业 OIDC
+授权服务器签发和治理访问令牌。配置 OIDC 后，401 响应的 `WWW-Authenticate` 会携带
+`resource_metadata`，服务也会按官方
+[Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) 规范发布
 Protected Resource Metadata。
 
 ### 管理模板与 Schema 版本
@@ -570,6 +586,88 @@ docker compose up --build
 `fonts-noto-cjk` 作为中文 PDF/HTML 渲染字体。Aspose License 仍按前文通过外部挂载文件及
 `ASPOSE_WORDS_LICENSE_PATH` 配置，不应打入镜像。`.env.example` 仅用于本地启动示例，不能作为公网凭证。
 
+### 统一 Generation Job REST API
+
+M11 第一阶段在现有 MCP HTTP 服务中增加独立 REST 契约。普通业务系统不需要模拟 MCP 会话，也不需要
+直接依赖 Function Calling 适配器，即可提交持久化异步任务；REST、MCP 和 Function Calling 仍复用
+同一个 `ExternalDocumentToolApplication` 与 export 链路。
+
+| 端点 | 权限 | 用途 |
+| --- | --- | --- |
+| `POST /v1/generation-jobs` | `generation:create` | 提交 `DOCUMENT_SPEC` 或 `TEMPLATE_DATA` 任务 |
+| `GET /v1/generation-jobs?limit=20&status=SUCCEEDED&cursor=...` | `generation:read` | 按状态和稳定游标列出当前租户任务 |
+| `GET /v1/generation-jobs/{jobId}` | `generation:read` | 查询任务状态、错误和工件 |
+| `POST /v1/generation-jobs/{jobId}/cancel` | `generation:cancel` | 取消尚未终结的任务 |
+| `GET /v1/generation-jobs/{jobId}/artifacts` | `generation:read` | 获取任务工件元数据 |
+| `POST /v1/document-specs/validate` | `generation:create` | 无副作用校验 DocumentSpec |
+| `POST /v1/templates/{id}/versions/{version}/validate-data` | `generation:create` | 校验模板数据和展开结果 |
+| `GET /v1/webhook-deliveries?limit=20` | `webhook:read` | 查询本租户投递状态与重试审计 |
+| `GET/POST /v1/admin/templates` | `templates:read/write` | 查询模板版本或创建草稿 |
+| `POST /v1/admin/templates/{id}/versions/{version}/{action}` | `templates:write/review` | 提交、审批、驳回或退役模板 |
+| `GET /v1/admin/templates/{id}/compare` | `templates:read` | 比较两个版本的数据 Schema 兼容性 |
+| `GET /v1/admin/operations/summary` | `operations:read` | 获取当前租户任务、Webhook 与依赖状态汇总 |
+| `GET /v1/openapi.json` | 无 | 获取 OpenAPI 3.0 契约 |
+
+提交接口支持 `Idempotency-Key` 和 `X-Correlation-Id`。幂等键按租户内调用主体隔离；相同键和相同规范化
+请求返回原任务，相同键但请求内容变化返回 `409`。成功任务只保存受控 `resourceUri` 与工件摘要，
+不保存或暴露服务器路径。
+
+列表接口按 `createdAt + jobId` 倒序，`nextCursor` 是不透明游标，调用方不应解析或自行构造。可选
+`status` 过滤任务状态。管理员还可通过仓库外的 `OMNI_OFFICE_QUOTA_CONFIG_PATH` 配置租户
+`maxActiveJobs` 和 `maxJobsPerDay`（按 UTC 自然日计算）；PostgreSQL 模式使用事务级租户锁原子准入，
+并发实例不会穿透上限。
+配置结构参考 `quota-config.example.json`。达到上限返回 `429 GENERATION_QUOTA_EXCEEDED` 和
+`Retry-After`，幂等重放已有任务不会重复占用配额。
+
+任务可以携带可选 `webhookId`，但不能提交回调 URL。服务只解析管理员通过
+`OMNI_OFFICE_WEBHOOK_CONFIG_PATH` 预注册的租户端点。配置文件必须位于仓库外且使用绝对路径，结构可参考
+`webhook-config.example.json`。公网端点必须使用 HTTPS；HTTP 只允许回环地址用于本地测试。
+
+终态事件先幂等写入持久化 Outbox，再由单线程投递器发送。请求头包含 `X-Omni-Event-Id`、
+`X-Omni-Event-Type`、`X-Omni-Timestamp` 和 `X-Omni-Signature: v1=<HMAC-SHA256>`；签名内容是
+`timestamp + "." + rawBody`。`408`、`429` 和 `5xx` 使用指数退避重试，其他 `4xx` 直接进入 `DEAD`。
+接收方应按事件 ID 去重。事件只包含任务、错误与工件摘要，不复制模板数据或 DocumentSpec 正文。
+
+默认 `FileGenerationJobRepository` 与 `FileWebhookDeliveryRepository` 仍是单实例开发实现。设置数据库
+配置后，Flyway 自动创建任务与 Outbox 表，PostgreSQL 唯一索引负责跨实例幂等，Worker 和 Webhook
+Dispatcher 使用带过期时间的租约与 `FOR UPDATE SKIP LOCKED` 原子领取。Worker 只允许在持有有效租约时
+提交结果；崩溃实例的租约到期后才会被其他实例恢复，不再在新实例启动时重置全部运行中任务。
+
+```bash
+export OMNI_OFFICE_DATABASE_URL='jdbc:postgresql://postgres:5432/omni_office'
+export OMNI_OFFICE_DATABASE_USERNAME='omni_office'
+export OMNI_OFFICE_DATABASE_PASSWORD='replace-with-a-strong-password'
+export OMNI_OFFICE_DATABASE_POOL_SIZE=10
+
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+```
+
+PostgreSQL 模式下，任务终态、`terminalEventId` 和 Webhook Outbox 事件在同一数据库事务中提交；文件模式
+继续依靠终态扫描和事件键幂等补偿。两种模式的投递语义都是至少一次，接收方仍必须按 `eventId` 去重。
+
+最终文档默认写入租户本地目录。配置 `OMNI_OFFICE_S3_BUCKET` 后，使用 S3/MinIO 兼容存储，并通过
+`OMNI_OFFICE_S3_PREFIX/tenants/{tenantId}` 物理隔离键空间。本地只保留受控读取缓存，资源 URI 和 HTTP
+下载契约保持不变。自定义 S3 端点必须使用 HTTPS；回环地址和 Compose 内部 `minio` 主机允许 HTTP。
+
+M12 同时提供 `OmniOfficeGenerationClient` Java SDK。SDK 支持 API Key/Bearer 身份、幂等提交、终态轮询、
+状态分页、取消、工件下载，以及模板草稿、审核、退役和 Schema 比较；非 2xx 响应会转换为包含 HTTP 状态、
+业务错误码和 `Retry-After` 的 `OmniOfficeApiException`。它是 REST 调用入口，与既有
+`OmniOfficeMcpHttpClient` 的 MCP 会话入口并存。
+
+M13 的 `/health/ready` 会分别报告数据目录、任务仓储和工件存储状态。`/metrics` 除全局计数外，还提供
+固定 `route/status` 标签的请求计数、各路由耗时 sum/count、运行时长、Generation Job/Webhook 状态，以及
+工件清理次数、错误和删除数量。指标刻意不使用 tenant、principal、jobId 等高基数或敏感标签。
+Prometheus 告警规则位于 `deploy/prometheus-alerts.yml`，依赖故障、租约恢复、Webhook 死信、工件清理和
+发布演练步骤见 `docs/operations-runbook.md`。
+
+M14 将发布门槛固化在 `scripts/release-check.sh`：校验 JSON 契约、运行完整测试、检查 Git diff，并在本地
+存在 `.env` 和 Docker 时验证 Compose。API 兼容规则见 `docs/api-versioning.md`，身份、秘密、数据恢复、
+灰度与回滚验收项见 `docs/release-checklist.md`。使用本机 Maven 运行：
+
+```bash
+MAVEN_BIN=/Users/luojiang/maven/apache-maven-3.6.3/bin/mvn ./scripts/release-check.sh
+```
+
 ### 里程碑状态
 
 | 里程碑 | 已实现结果 |
@@ -584,6 +682,12 @@ docker compose up --build
 | M8 | AI 调用轨迹、评测报告、四眼人工审核 |
 | M9 | 生命周期、对象存储 SPI、安全/病毒扫描适配、审计、MCP Tasks |
 | M10 | 服务配置、健康/指标、Docker/Compose 与 HTML 输出 |
+| M11-A | Generation Job 状态机、原子文件仓储、幂等/恢复/取消、REST 与 OpenAPI |
+| M11-B | 预注册 Webhook、终态事件 Outbox、HMAC 签名、重试、指标与投递审计 |
+| M11-C | PostgreSQL/Flyway、跨实例租约抢占、事务型 Outbox、OIDC/JWKS 与 S3/MinIO 工件适配 |
+| M12 | 模板管理 REST API、四眼审核/退役、Schema 比较、任务稳定分页、原子租户配额与 Java REST SDK |
+| M13 | 依赖级就绪检查、租户运维汇总、低基数请求/耗时/清理指标、Prometheus 告警与故障演练手册 |
+| M14 | 契约一致性测试、API 兼容/弃用策略、可执行发布检查、备份恢复及安全发布清单 |
 
 未显式设置的报告内容会使用以下默认值：
 
@@ -605,7 +709,16 @@ docker compose up --build
 mvn clean test
 ```
 
-截至 2026-08-18，完整测试集包含 142 项测试，结果为 0 failure、0 error、0 skipped；覆盖真实本地 HTTP
+生成公共 Java API 的 Javadoc：
+
+```bash
+mvn -DskipTests javadoc:javadoc
+```
+
+直接执行上述目标时，生成结果位于 `target/reports/apidocs/`。任务仓储、租约、配额、Webhook、模板治理、REST SDK、OIDC 和
+对象存储等公共扩展点均在 Javadoc 中说明参数、返回值、异常和并发/安全边界。
+
+截至 2026-08-21，完整测试集包含 170 项测试，结果为 0 failure、0 error、0 skipped；覆盖真实本地 HTTP
 会话、多租户隔离、异步任务、模板治理、AI 审核以及 DOCX 结构。生成的 DOCX、PDF、HTML、SVG、VSDX
 和测试产物位于 `target/`，该目录不会提交到 Git。
 
@@ -966,9 +1079,11 @@ mvn test
 - Word 目录和页码属于动态域，不同阅读器可能在首次打开时重新计算。
 - 中文排版依赖运行环境字体；项目容器已安装 Noto CJK，其他部署方式需要提供等价字体。
 - 内置 HTTP 服务使用 JDK HttpServer 并提供 JSON 响应模式，当前未提供服务端 SSE 消息流。
-- 项目验证 HS256 JWT，但不是 OAuth 授权服务器；公网部署应接入企业 OAuth 2.1/OIDC 和短期令牌。
-- S3、OSS、MinIO 与 ClamAV 以适配边界提供，只有配置真实实现和扫描命令后才能声明启用。
+- 项目不是 OAuth 授权服务器；公网部署应使用已经支持的企业 OIDC Discovery/JWKS 和短期令牌，HS256
+  只适合本地或迁移期。
+- S3/MinIO 已提供生产适配器，OSS 可通过 S3 兼容端点接入；ClamAV 仍需要部署真实扫描命令后才能声明启用。
 - JSON Lines 轨迹、审计和文件模板目录适合单实例；多实例生产部署应接入共享存储和统一观测平台。
+- PostgreSQL 仓储需要真实数据库集成环境执行迁移和故障注入测试；默认文件模式不能作为多实例生产队列。
 
 ## 安全与仓库约定
 

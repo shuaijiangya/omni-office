@@ -1,0 +1,10 @@
+{
+  "tenants": {
+    "default": {
+      "business-system": {
+        "url": "https://callback.example.com/omni-office/events",
+        "secret": "replace-with-at-least-32-characters"
+      }
+    }
+  }
+}

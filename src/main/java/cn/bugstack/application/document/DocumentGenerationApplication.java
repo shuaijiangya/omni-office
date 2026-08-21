@@ -19,7 +19,8 @@ import java.nio.file.Path;
 public final class DocumentGenerationApplication implements DynamicDocumentExporter {
 
     private final DiagramGenerationService diagramService;
-    private final DynamicDocumentExporter documentExporter;
+    private final DefaultDynamicDocumentExporter documentExporter;
+    private final DocumentSpecValidator documentValidator;
 
     public DocumentGenerationApplication(Path artifactRoot) {
         this(new LocalDiagramArtifactStore(artifactRoot));
@@ -32,8 +33,9 @@ public final class DocumentGenerationApplication implements DynamicDocumentExpor
         }
         this.diagramService = new DefaultDiagramGenerationService(store);
         DiagramBlockResolver resolver = new DefaultDiagramBlockResolver(diagramService, store);
+        this.documentValidator = new DocumentSpecValidator(DocumentSpecLimits.defaults(), true);
         this.documentExporter = new DefaultDynamicDocumentExporter(
-                new DocumentSpecValidator(DocumentSpecLimits.defaults(), true),
+                documentValidator,
                 new DefaultDocumentSpecCompiler(resolver),
                 new DocumentSpecBlueprintFactory(),
                 new ReportDocumentValidator(),
@@ -42,6 +44,11 @@ public final class DocumentGenerationApplication implements DynamicDocumentExpor
 
     public DiagramArtifactReference generateDiagram(DiagramSpec spec) {
         return diagramService.generate(spec);
+    }
+
+    /** 执行无副作用的协议与语义约束校验；不会解析或生成图工件。 */
+    public void validate(DocumentSpec spec) {
+        documentValidator.validate(spec).throwIfInvalid();
     }
 
     @Override

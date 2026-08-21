@@ -1,0 +1,12 @@
+{
+  "default": {
+    "maxActiveJobs": 20,
+    "maxJobsPerDay": 1000
+  },
+  "tenants": {
+    "premium-tenant": {
+      "maxActiveJobs": 100,
+      "maxJobsPerDay": 10000
+    }
+  }
+}

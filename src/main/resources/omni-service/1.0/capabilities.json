@@ -8,9 +8,16 @@
       "jsonResponse": true,
       "sseListener": false,
       "sessions": true
+    },
+    "rest": {
+      "openapi": "/v1/openapi.json",
+      "generationJobs": "/v1/generation-jobs",
+      "asynchronous": true,
+      "idempotencyKey": true,
+      "correlationId": true
     }
   },
-  "authentication": ["api-key", "jwt-hs256"],
+  "authentication": ["api-key", "jwt-hs256", "oidc-discovery-jwks-rs256"],
   "isolation": ["tenant-artifacts", "identity-sessions", "identity-tasks"],
   "outputFormats": ["DOCX", "PDF", "HTML"],
   "operations": [
@@ -18,8 +25,53 @@
     "tasks/get", "tasks/result", "tasks/list", "tasks/cancel"
   ],
   "operationsEndpoints": [
-    "/health/live", "/health/ready", "/metrics", "/artifacts/{artifactId}"
+    "/health/live", "/health/ready", "/metrics", "/artifacts/{artifactId}",
+    "/v1/generation-jobs", "/v1/document-specs/validate",
+    "/v1/templates/{templateId}/versions/{version}/validate-data",
+    "/v1/admin/templates", "/v1/admin/operations/summary",
+    "/v1/webhook-deliveries", "/v1/openapi.json"
   ],
+  "generationJob": {
+    "modes": ["TEMPLATE_DATA", "DOCUMENT_SPEC"],
+    "statuses": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"],
+    "developmentRepository": "atomic-file",
+    "productionRepository": "postgresql",
+    "multiInstanceClaim": "lease-and-skip-locked",
+    "restartRecovery": true,
+    "maximumListLimit": 100,
+    "stableCursorPagination": true,
+    "statusFilter": true,
+    "quotaAdmission": ["maxActiveJobs", "maxJobsPerDay"],
+    "quotaAdmissionAtomicInPostgresql": true
+  },
+  "webhook": {
+    "callerSuppliedUrlAllowed": false,
+    "preRegisteredEndpointId": true,
+    "persistentOutbox": ["atomic-file", "postgresql-transactional"],
+    "multiInstanceClaim": "lease-and-skip-locked",
+    "deliverySemantics": "at-least-once",
+    "signature": "HMAC-SHA256",
+    "retryableStatuses": [408, 429, "5xx"],
+    "auditEndpoint": "/v1/webhook-deliveries"
+  },
+  "artifactStorage": {
+    "development": "tenant-local-file",
+    "production": "s3-compatible",
+    "tenantPrefixIsolation": true,
+    "controlledResourceUri": true
+  },
+  "oauthProtectedResourceMetadata": {
+    "endpoint": "/.well-known/oauth-protected-resource",
+    "wwwAuthenticateResourceMetadata": true,
+    "authorizationServerDiscovery": "oidc"
+  },
+  "templateManagement": {
+    "endpoint": "/v1/admin/templates",
+    "statuses": ["DRAFT", "IN_REVIEW", "PUBLISHED", "REJECTED", "RETIRED"],
+    "fourEyesApproval": true,
+    "schemaComparison": true
+  },
+  "javaSdk": ["generation-jobs", "polling", "artifacts", "template-management"],
   "governance": ["template-review", "immutable-schema-version", "explicit-migration"],
   "security": ["origin-validation", "rate-limit", "concurrency-limit", "artifact-integrity", "audit"]
 }

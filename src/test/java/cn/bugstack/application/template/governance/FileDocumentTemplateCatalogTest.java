@@ -27,6 +27,8 @@ class FileDocumentTemplateCatalogTest {
                 () -> catalog.require(template.getTemplateId(), template.getVersion()));
         assertEquals(TemplateLifecycleStatus.IN_REVIEW,
                 catalog.submit(template.getTemplateId(), template.getVersion(), "author").getStatus());
+        assertThrows(IllegalStateException.class,
+                () -> catalog.approve(template.getTemplateId(), template.getVersion(), "author", "self"));
         assertEquals(TemplateLifecycleStatus.PUBLISHED,
                 catalog.approve(template.getTemplateId(), template.getVersion(), "reviewer", "approved")
                         .getStatus());

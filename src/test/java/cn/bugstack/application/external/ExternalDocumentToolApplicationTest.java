@@ -126,6 +126,28 @@ class ExternalDocumentToolApplicationTest {
                 ExternalDocumentToolApplication.EXPORT_DOCUMENT, documentArguments));
     }
 
+    @Test
+    void rejectsUnmanagedImageSourcesFromExternalDocumentSpec() throws Exception {
+        ExternalDocumentToolApplication application = application("external-tools-image-boundary");
+        ObjectNode document = (ObjectNode) readResource("/document-spec/1.0/example-simple.json").deepCopy();
+        ObjectNode image = mapper.createObjectNode();
+        image.put("type", "image");
+        image.put("source", "/etc/passwd");
+        ((com.fasterxml.jackson.databind.node.ArrayNode) document.path("sections").get(0).path("blocks"))
+                .add(image);
+        document.put("outputFormat", "DOCX");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> application.call(ExternalDocumentToolApplication.EXPORT_DOCUMENT, document));
+        assertTrue(error.getMessage().contains("EXTERNAL_IMAGE_NOT_ALLOWED"));
+        ExternalToolDefinition tool = application.listTools().stream()
+                .filter(item -> ExternalDocumentToolApplication.EXPORT_DOCUMENT.equals(item.getName()))
+                .findFirst().orElseThrow();
+        assertTrue(java.util.stream.StreamSupport.stream(tool.getInputSchema().path("$defs")
+                        .path("block").path("oneOf").spliterator(), false)
+                .noneMatch(item -> "#/$defs/imageBlock".equals(item.path("$ref").asText())));
+    }
+
     private ExternalDocumentToolApplication application(String prefix) throws Exception {
         return new ExternalDocumentToolApplication(Files.createTempDirectory(prefix));
     }

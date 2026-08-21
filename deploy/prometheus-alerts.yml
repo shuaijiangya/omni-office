@@ -1,0 +1,48 @@
+groups:
+  - name: omni-office
+    rules:
+      - alert: OmniOfficeTargetDown
+        expr: up{job="omni-office"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Omni Office metrics target is unavailable"
+          runbook: "docs/operations-runbook.md#服务不可用或未就绪"
+
+      - alert: OmniOfficeHttp5xxRateHigh
+        expr: |
+          sum(rate(omni_office_http_route_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(omni_office_http_route_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Omni Office 5xx rate exceeds 5%"
+          runbook: "docs/operations-runbook.md#http-5xx-升高"
+
+      - alert: OmniOfficeGenerationQueueBacklog
+        expr: omni_office_generation_jobs{status="queued"} > 50
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Omni Office generation queue remains above 50"
+          runbook: "docs/operations-runbook.md#任务积压或租约恢复"
+
+      - alert: OmniOfficeWebhookDeadLetters
+        expr: omni_office_webhook_deliveries{status="dead"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Omni Office has dead webhook deliveries"
+          runbook: "docs/operations-runbook.md#webhook-投递失败"
+
+      - alert: OmniOfficeArtifactCleanupErrors
+        expr: increase(omni_office_artifact_cleanup_errors_total[2h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Omni Office artifact cleanup failed"
+          runbook: "docs/operations-runbook.md#工件清理失败"

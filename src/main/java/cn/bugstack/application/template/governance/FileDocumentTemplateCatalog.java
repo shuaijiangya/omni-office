@@ -66,7 +66,8 @@ public final class FileDocumentTemplateCatalog implements DocumentTemplateCatalo
         TemplateRevision value = read(templateId, version);
         if (value.getStatus() != TemplateLifecycleStatus.DRAFT
                 && value.getStatus() != TemplateLifecycleStatus.REJECTED) {
-            throw new IllegalStateException("only draft or rejected template versions can be submitted");
+            throw new TemplateWorkflowConflictException(
+                    "only draft or rejected template versions can be submitted");
         }
         value.setStatus(TemplateLifecycleStatus.IN_REVIEW);
         value.setReviewedBy(null);
@@ -79,8 +80,13 @@ public final class FileDocumentTemplateCatalog implements DocumentTemplateCatalo
     public synchronized TemplateRevision approve(String templateId, String version,
                                                   String reviewer, String comment) {
         TemplateRevision value = requireInReview(templateId, version);
+        String actor = requireActor(reviewer);
+        if (actor.equals(value.getCreatedBy())) {
+            throw new TemplateWorkflowConflictException(
+                    "template creator cannot approve the same template version");
+        }
         value.setStatus(TemplateLifecycleStatus.PUBLISHED);
-        value.setReviewedBy(requireActor(reviewer));
+        value.setReviewedBy(actor);
         value.setReviewComment(boundedComment(comment));
         value.setUpdatedAt(clock.instant());
         write(value, path(templateId, version), false);
@@ -96,6 +102,24 @@ public final class FileDocumentTemplateCatalog implements DocumentTemplateCatalo
         value.setStatus(TemplateLifecycleStatus.REJECTED);
         value.setReviewedBy(requireActor(reviewer));
         value.setReviewComment(boundedComment(comment));
+        value.setUpdatedAt(clock.instant());
+        write(value, path(templateId, version), false);
+        return copy(value);
+    }
+
+    public synchronized TemplateRevision retire(String templateId, String version,
+                                                 String actor, String reason) {
+        TemplateRevision value = read(templateId, version);
+        if (value.getStatus() != TemplateLifecycleStatus.PUBLISHED) {
+            throw new TemplateWorkflowConflictException(
+                    "only a published template version can be retired");
+        }
+        if (reason == null || reason.trim().isEmpty()) {
+            throw new IllegalArgumentException("template retirement requires a reason");
+        }
+        value.setStatus(TemplateLifecycleStatus.RETIRED);
+        value.setReviewedBy(requireActor(actor));
+        value.setReviewComment(boundedComment(reason));
         value.setUpdatedAt(clock.instant());
         write(value, path(templateId, version), false);
         return copy(value);
@@ -145,7 +169,7 @@ public final class FileDocumentTemplateCatalog implements DocumentTemplateCatalo
         validator.validateOrThrow(template);
         Path path = path(template.getTemplateId(), template.getVersion());
         if (Files.exists(path)) {
-            throw new IllegalStateException("document template version already exists: "
+            throw new TemplateWorkflowConflictException("document template version already exists: "
                     + template.getTemplateId() + "@" + template.getVersion());
         }
         Instant now = clock.instant();
@@ -162,7 +186,8 @@ public final class FileDocumentTemplateCatalog implements DocumentTemplateCatalo
     private TemplateRevision requireInReview(String templateId, String version) {
         TemplateRevision value = read(templateId, version);
         if (value.getStatus() != TemplateLifecycleStatus.IN_REVIEW) {
-            throw new IllegalStateException("only an in-review template version can be reviewed");
+            throw new TemplateWorkflowConflictException(
+                    "only an in-review template version can be reviewed");
         }
         return value;
     }
@@ -196,7 +221,8 @@ public final class FileDocumentTemplateCatalog implements DocumentTemplateCatalo
             try {
                 mapper.writerWithDefaultPrettyPrinter().writeValue(temporary.toFile(), value);
                 if (newVersion && Files.exists(target)) {
-                    throw new IllegalStateException("document template version already exists");
+                    throw new TemplateWorkflowConflictException(
+                            "document template version already exists");
                 }
                 try {
                     Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE,

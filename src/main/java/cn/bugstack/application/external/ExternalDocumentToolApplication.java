@@ -53,6 +53,7 @@ public final class ExternalDocumentToolApplication {
     private final DocumentTemplateApplication templates;
     private final ExternalArtifactStore outputStore;
     private final Map<String, ExternalToolDefinition> definitions;
+    private final ExternalDocumentSpecSafetyValidator externalSafety = new ExternalDocumentSpecSafetyValidator();
 
     public ExternalDocumentToolApplication(Path artifactRoot) {
         this(artifactRoot, new ObjectMapper());
@@ -62,12 +63,23 @@ public final class ExternalDocumentToolApplication {
         this(artifactRoot, new ObjectMapper(), templateCatalog);
     }
 
+    public ExternalDocumentToolApplication(Path artifactRoot, DocumentTemplateCatalog templateCatalog,
+                                           ExternalArtifactStore outputStore) {
+        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore);
+    }
+
     ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper) {
         this(artifactRoot, mapper, null);
     }
 
     private ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper,
                                             DocumentTemplateCatalog templateCatalog) {
+        this(artifactRoot, mapper, templateCatalog, null);
+    }
+
+    private ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper,
+                                            DocumentTemplateCatalog templateCatalog,
+                                            ExternalArtifactStore configuredOutputStore) {
         if (artifactRoot == null || mapper == null) {
             throw new IllegalArgumentException("external document tool root and mapper are required");
         }
@@ -79,7 +91,8 @@ public final class ExternalDocumentToolApplication {
         this.documents = new DocumentGenerationApplication(diagramStore);
         this.templates = templateCatalog == null ? new DocumentTemplateApplication(documents)
                 : new DocumentTemplateApplication(templateCatalog, documents);
-        this.outputStore = new LocalExternalArtifactStore(root.resolve("outputs"));
+        this.outputStore = configuredOutputStore == null
+                ? new LocalExternalArtifactStore(root.resolve("outputs")) : configuredOutputStore;
         this.definitions = Collections.unmodifiableMap(createDefinitions());
     }
 
@@ -128,6 +141,25 @@ public final class ExternalDocumentToolApplication {
         return outputStore.purgeExpired(now);
     }
 
+    /** 供 REST 等协议适配器在提交任务前执行无副作用 DocumentSpec 校验。 */
+    public void validateDocument(JsonNode documentSpec) {
+        if (documentSpec == null || !documentSpec.isObject()) {
+            throw new IllegalArgumentException("documentSpec must be a JSON object");
+        }
+        DocumentSpec spec = documentCodec.read(documentSpec.toString());
+        documents.validate(spec);
+        externalSafety.validateOrThrow(spec);
+    }
+
+    /** 校验模板数据、执行受限映射并校验映射后的 DocumentSpec，但不生成文件或图工件。 */
+    public void validateTemplateData(String templateId, String version, JsonNode data) {
+        if (templateId == null || templateId.isBlank() || version == null || version.isBlank()
+                || data == null || !data.isObject()) {
+            throw new IllegalArgumentException("template id, version and object data are required");
+        }
+        documents.validate(templates.renderSpec(templateId, version, data));
+    }
+
     private ExternalToolResult listTemplates() {
         ArrayNode values = mapper.createArrayNode();
         for (DocumentTemplateDescriptor template : templates.listTemplates()) {
@@ -171,6 +203,7 @@ public final class ExternalDocumentToolApplication {
         ReportOutputFormat format = outputFormat(specJson);
         specJson.remove("outputFormat");
         DocumentSpec spec = documentCodec.read(specJson.toString());
+        externalSafety.validateOrThrow(spec);
         byte[] content = documents.exportToBytes(spec, format);
         ExternalArtifactReference artifact = storeDocument(content, format);
         ObjectNode result = mapper.createObjectNode();
@@ -259,6 +292,10 @@ public final class ExternalDocumentToolApplication {
         ((ObjectNode) schema.path("properties")).set("outputFormat", outputFormatSchema());
         ((ArrayNode) schema.path("required")).add("outputFormat");
         ObjectNode definitions = (ObjectNode) schema.path("$defs");
+        ArrayNode blocks = (ArrayNode) definitions.path("block").path("oneOf");
+        for (int i = blocks.size() - 1; i >= 0; i--) {
+            if ("#/$defs/imageBlock".equals(blocks.get(i).path("$ref").asText())) blocks.remove(i);
+        }
         definitions.set("diagramSpec", classPathJson("/diagram-spec/1.0/schema.json"));
         ObjectNode inlineDiagram = mapper.createObjectNode();
         inlineDiagram.put("$ref", "#/$defs/diagramSpec");
