@@ -2,9 +2,11 @@ package cn.bugstack.office.docx.builder;
 
 import cn.bugstack.office.docx.model.ParagraphNode;
 import cn.bugstack.office.docx.model.TableCellNode;
+import cn.bugstack.office.docx.model.TableHorizontalAlignment;
 import cn.bugstack.office.docx.model.TableNode;
 import cn.bugstack.office.docx.model.TableRowNode;
 import cn.bugstack.office.docx.model.TextRunInline;
+import cn.bugstack.office.docx.style.RunStyle;
 
 import java.util.function.Consumer;
 
@@ -43,13 +45,46 @@ public class TableBuilder<P> {
     }
 
     /**
-     * 设置表格列宽。
+     * 设置表格列宽比例。
      *
-     * @param widths 列宽数组，单位为 point
+     * @param widths 列宽比例权重；例如 {@code 1, 2, 1} 表示三列占比为 25%、50%、25%
      * @return 当前表格 Builder
      */
     public TableBuilder<P> widths(double... widths) {
         table.setColumnWidths(widths);
+        return this;
+    }
+
+    /**
+     * 设置表格相对页面可用宽度的水平对齐方式。
+     *
+     * @param alignment 左对齐、居中或右对齐
+     * @return 当前表格 Builder
+     */
+    public TableBuilder<P> alignment(TableHorizontalAlignment alignment) {
+        table.setAlignment(alignment);
+        return this;
+    }
+
+    /**
+     * 设置当前表格的表头文本样式覆盖。
+     *
+     * @param style 表头文本样式；为空时继承文档表格样式
+     * @return 当前表格 Builder
+     */
+    public TableBuilder<P> headerTextStyle(RunStyle style) {
+        table.setHeaderTextStyle(style);
+        return this;
+    }
+
+    /**
+     * 设置当前表格的表内容文本样式覆盖。
+     *
+     * @param style 表内容文本样式；为空时继承文档表格样式
+     * @return 当前表格 Builder
+     */
+    public TableBuilder<P> bodyTextStyle(RunStyle style) {
+        table.setBodyTextStyle(style);
         return this;
     }
 

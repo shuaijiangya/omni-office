@@ -89,6 +89,12 @@ public final class S3ExternalArtifactStoreProvider implements ExternalArtifactSt
 
     /** {@inheritDoc} */
     @Override
+    public Duration retention() {
+        return retention;
+    }
+
+    /** {@inheritDoc} */
+    @Override
     public void close() {
         client.close();
     }

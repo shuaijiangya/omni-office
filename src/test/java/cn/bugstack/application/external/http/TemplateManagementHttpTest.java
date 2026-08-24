@@ -56,9 +56,14 @@ class TemplateManagementHttpTest {
 
             assertEquals(200, postNoBody(URI.create(revision + "/submit"), "author-key").statusCode());
             ObjectNode comment = mapper.createObjectNode().put("comment", "reviewed");
+            try (InputStream input = getClass().getResourceAsStream(
+                    "/document-template/1.0/example-assessment-data.json")) {
+                comment.set("sampleData", mapper.readTree(input));
+            }
             assertEquals(409, post(URI.create(revision + "/approve"), "author-key", comment).statusCode());
             JsonNode approved = json(post(URI.create(revision + "/approve"), "reviewer-key", comment));
             assertEquals("PUBLISHED", approved.path("status").asText());
+            assertEquals(64, approved.path("renderedSha256").asText().length());
 
             URI compare = base.resolve("/v1/admin/templates/custom.assessment/compare"
                     + "?fromVersion=1.0.0&toVersion=1.0.0");

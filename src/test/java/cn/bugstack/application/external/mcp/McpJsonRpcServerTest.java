@@ -40,7 +40,7 @@ class McpJsonRpcServerTest {
         notification.put("jsonrpc", "2.0");
         notification.put("method", "notifications/initialized");
         assertNull(server.handle(notification));
-        assertEquals(5, server.handle(request(3, "tools/list"))
+        assertEquals(8, server.handle(request(3, "tools/list"))
                 .path("result").path("tools").size());
     }
 

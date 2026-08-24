@@ -12,6 +12,9 @@ public final class DocumentSpec {
     private DocumentMetadataSpec metadata = new DocumentMetadataSpec();
     private DocumentLayoutSpec layout = new DocumentLayoutSpec();
     private List<SectionSpec> sections = new ArrayList<>();
+    private DocumentCoverSpec cover;
+    private List<DocumentRevisionSpec> revisionHistory = new ArrayList<>();
+    private List<DocumentApprovalSpec> approvals = new ArrayList<>();
 
     public String getSchemaVersion() {
         return schemaVersion;
@@ -50,5 +53,16 @@ public final class DocumentSpec {
             sections.add(section);
         }
         return this;
+    }
+
+    public DocumentCoverSpec getCover() { return cover; }
+    public void setCover(DocumentCoverSpec cover) { this.cover = cover; }
+    public List<DocumentRevisionSpec> getRevisionHistory() { return revisionHistory; }
+    public void setRevisionHistory(List<DocumentRevisionSpec> revisionHistory) {
+        this.revisionHistory = revisionHistory == null ? new ArrayList<>() : revisionHistory;
+    }
+    public List<DocumentApprovalSpec> getApprovals() { return approvals; }
+    public void setApprovals(List<DocumentApprovalSpec> approvals) {
+        this.approvals = approvals == null ? new ArrayList<>() : approvals;
     }
 }

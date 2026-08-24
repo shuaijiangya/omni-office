@@ -6,6 +6,10 @@ import cn.bugstack.application.audit.AuditLog;
 import cn.bugstack.application.external.LocalExternalArtifactStoreProvider;
 import cn.bugstack.application.generation.FileGenerationJobRepositoryProvider;
 import cn.bugstack.application.generation.GenerationQuota;
+import cn.bugstack.application.generation.GenerationJobRecord;
+import cn.bugstack.application.generation.GenerationJobRepository;
+import cn.bugstack.application.generation.GenerationJobStatus;
+import cn.bugstack.application.generation.GenerationMode;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -24,6 +28,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -160,6 +165,38 @@ class GenerationJobHttpTest {
     }
 
     @Test
+    void keepsJobsAndArtifactsPrivateToPrincipalUnlessAnyScopeIsGranted() throws Exception {
+        Map<String, RequestIdentity> keys = new LinkedHashMap<>();
+        keys.put("alice-key", scopedIdentity("tenant-a", "alice", "generation:create",
+                "generation:read", "artifacts:read"));
+        keys.put("bob-key-1", scopedIdentity("tenant-a", "bob", "generation:read", "artifacts:read"));
+        keys.put("admin-key", scopedIdentity("tenant-a", "admin", "generation:read:any",
+                "artifacts:read:any"));
+        McpHttpServerConfig config = new McpHttpServerConfig(new InetSocketAddress("127.0.0.1", 0),
+                Files.createTempDirectory("generation-principal-http"), Collections.emptySet(),
+                2 * 1024 * 1024, 500, 4, Duration.ofSeconds(30), Duration.ofMinutes(5));
+        try (McpHttpServer server = new McpHttpServer(config, new StaticApiKeyAuthenticator(keys))) {
+            server.start();
+            URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
+                    + "/v1/generation-jobs");
+            JsonNode submitted = mapper.readTree(post(endpoint, "alice-key", "alice-owned",
+                    documentRequest()).body());
+            String jobId = submitted.path("jobId").asText();
+            JsonNode completed = awaitTerminal(endpoint.resolve("/v1/generation-jobs/" + jobId), "alice-key");
+            String resourceUri = completed.path("artifacts").path(0).path("resourceUri").asText();
+            String artifactId = resourceUri.substring(resourceUri.lastIndexOf('/') + 1);
+
+            assertEquals(404, get(endpoint.resolve("/v1/generation-jobs/" + jobId), "bob-key-1").statusCode());
+            JsonNode bobJobs = mapper.readTree(get(endpoint, "bob-key-1").body());
+            assertEquals(0, bobJobs.path("jobs").size());
+            assertEquals(404, get(endpoint.resolve("/artifacts/" + artifactId), "bob-key-1").statusCode());
+
+            assertEquals(200, get(endpoint.resolve("/v1/generation-jobs/" + jobId), "admin-key").statusCode());
+            assertEquals(200, get(endpoint.resolve("/artifacts/" + artifactId), "admin-key").statusCode());
+        }
+    }
+
+    @Test
     void publishesTerminalEventThroughPreRegisteredWebhook() throws Exception {
         com.sun.net.httpserver.HttpServer receiver = com.sun.net.httpserver.HttpServer.create(
                 new InetSocketAddress("127.0.0.1", 0), 0);
@@ -219,8 +256,103 @@ class GenerationJobHttpTest {
         }
     }
 
+    @Test
+    void recoversPersistedTenantWorkerOnServerStartWithoutNewTenantRequest() throws Exception {
+        java.nio.file.Path root = Files.createTempDirectory("generation-cold-recovery");
+        FileGenerationJobRepositoryProvider repositories = new FileGenerationJobRepositoryProvider(root);
+        GenerationJobRepository repository = repositories.repository("tenant-a");
+        Instant now = Instant.now();
+        GenerationJobRecord queued = new GenerationJobRecord();
+        queued.setJobId(UUID.randomUUID().toString());
+        queued.setTenantId("tenant-a");
+        queued.setPrincipalId("alice");
+        queued.setCorrelationId("cold-recovery");
+        queued.setRequestSha256("cold-recovery-request");
+        queued.setMode(GenerationMode.DOCUMENT_SPEC);
+        queued.setRequest(documentRequest());
+        queued.setStatus(GenerationJobStatus.QUEUED);
+        queued.setMaxAttempts(2);
+        queued.setCreatedAt(now);
+        queued.setUpdatedAt(now);
+        repository.create(queued);
+
+        Map<String, RequestIdentity> keys = Map.of("tenant-a-key", identity("tenant-a", "alice"));
+        McpHttpServerConfig config = new McpHttpServerConfig(new InetSocketAddress("127.0.0.1", 0),
+                root, Collections.emptySet(), 2 * 1024 * 1024, 500, 4,
+                Duration.ofSeconds(30), Duration.ofMinutes(5));
+        try (McpHttpServer server = new McpHttpServer(config, new StaticApiKeyAuthenticator(keys),
+                AuditLog.noop(), repositories, new LocalExternalArtifactStoreProvider())) {
+            server.start();
+            Instant deadline = Instant.now().plusSeconds(20);
+            GenerationJobRecord recovered;
+            do {
+                recovered = repository.find(queued.getJobId()).orElseThrow();
+                if (recovered.getStatus().isTerminal()) break;
+                Thread.sleep(20);
+            } while (Instant.now().isBefore(deadline));
+            assertEquals(GenerationJobStatus.SUCCEEDED, recovered.getStatus());
+        }
+    }
+
+    @Test
+    void requiresAiScopeAndConfiguredProviderBeforeAcceptingAiJob() throws Exception {
+        java.nio.file.Path root = Files.createTempDirectory("generation-ai-http-guard");
+        Map<String, RequestIdentity> keys = new LinkedHashMap<>();
+        keys.put("without-ai-key", scopedIdentity("tenant-a", "alice", "generation:create"));
+        keys.put("internal-ai-key", scopedIdentity("tenant-a", "alice", "generation:create", "ai:generate"));
+        McpHttpServerConfig config = new McpHttpServerConfig(new InetSocketAddress("127.0.0.1", 0),
+                root, Collections.emptySet(), 2 * 1024 * 1024, 500, 4,
+                Duration.ofSeconds(30), Duration.ofMinutes(5));
+        ObjectNode request = aiRequest();
+        try (McpHttpServer server = new McpHttpServer(config, new StaticApiKeyAuthenticator(keys))) {
+            server.start();
+            URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
+                    + "/v1/generation-jobs");
+            assertEquals(403, post(endpoint, "without-ai-key", null, request).statusCode());
+            HttpResponse<byte[]> unavailable = post(endpoint, "internal-ai-key", null, request);
+            assertEquals(503, unavailable.statusCode());
+            assertEquals("AI_GENERATION_NOT_CONFIGURED",
+                    mapper.readTree(unavailable.body()).path("code").asText());
+        }
+    }
+
+    @Test
+    void runsConfiguredStructuredAiAsPrincipalOwnedGenerationJob() throws Exception {
+        java.nio.file.Path root = Files.createTempDirectory("generation-ai-http");
+        String modelOutput;
+        try (InputStream input = getClass().getResourceAsStream("/document-spec/1.0/example-simple.json")) {
+            modelOutput = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        Map<String, RequestIdentity> keys = Map.of("internal-ai-key", scopedIdentity("tenant-a", "alice",
+                "generation:create", "generation:read", "artifacts:read", "ai:generate"));
+        McpHttpServerConfig config = new McpHttpServerConfig(new InetSocketAddress("127.0.0.1", 0),
+                root, Collections.emptySet(), 2 * 1024 * 1024, 500, 4,
+                Duration.ofSeconds(30), Duration.ofMinutes(5));
+        try (McpHttpServer server = new McpHttpServer(config, new StaticApiKeyAuthenticator(keys),
+                AuditLog.noop(), new FileGenerationJobRepositoryProvider(root),
+                new LocalExternalArtifactStoreProvider(),
+                cn.bugstack.application.generation.GenerationQuotaPolicy.unlimited(),
+                Duration.ofDays(30), Duration.ofDays(30), ignored -> modelOutput)) {
+            server.start();
+            URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
+                    + "/v1/generation-jobs");
+            JsonNode submitted = mapper.readTree(post(endpoint, "internal-ai-key", "ai-http", aiRequest()).body());
+            JsonNode completed = awaitTerminal(endpoint.resolve("/v1/generation-jobs/"
+                    + submitted.path("jobId").asText()), "internal-ai-key");
+            assertEquals("SUCCEEDED", completed.path("status").asText(), completed.toString());
+            assertEquals("AI_FREEFORM", completed.path("mode").asText());
+            assertEquals(1, completed.path("maxAttempts").asInt());
+            assertEquals("text/html", completed.path("artifacts").path(0).path("mediaType").asText());
+        }
+    }
+
     private RequestIdentity identity(String tenant, String principal) {
         return new RequestIdentity(tenant, principal, Collections.singleton("*"));
+    }
+
+    private RequestIdentity scopedIdentity(String tenant, String principal, String... scopes) {
+        return new RequestIdentity(tenant, principal,
+                new java.util.LinkedHashSet<>(java.util.Arrays.asList(scopes)));
     }
 
     private HttpResponse<byte[]> post(URI uri, String key, String idempotencyKey, JsonNode body) throws Exception {
@@ -257,6 +389,15 @@ class GenerationJobHttpTest {
         try (InputStream input = getClass().getResourceAsStream("/document-spec/1.0/example-simple.json")) {
             value.set("documentSpec", mapper.readTree(input));
         }
+        return value;
+    }
+
+    private ObjectNode aiRequest() {
+        ObjectNode value = mapper.createObjectNode();
+        value.put("mode", "AI_FREEFORM");
+        value.put("outputFormat", "HTML");
+        value.put("instruction", "生成系统评估报告");
+        value.putObject("context").put("system", "omni-office");
         return value;
     }
 }

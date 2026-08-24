@@ -3,6 +3,8 @@ package cn.bugstack.application.external.http;
 import cn.bugstack.application.external.ExternalDocumentToolApplication;
 import cn.bugstack.application.external.ExternalArtifactStoreProvider;
 import cn.bugstack.application.external.LocalExternalArtifactStoreProvider;
+import cn.bugstack.application.ai.StructuredAiClient;
+import cn.bugstack.application.concurrent.BoundedExecutors;
 import cn.bugstack.application.generation.FileGenerationJobRepositoryProvider;
 import cn.bugstack.application.generation.GenerationJobApplication;
 import cn.bugstack.application.generation.GenerationEventPublisher;
@@ -18,7 +20,12 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.time.Instant;
+import java.time.Duration;
 import java.nio.file.Files;
 import java.io.IOException;
 import java.util.EnumMap;
@@ -33,6 +40,10 @@ public final class TenantApplicationRegistry implements AutoCloseable {
     private final GenerationJobRepositoryProvider jobRepositories;
     private final ExternalArtifactStoreProvider artifactStores;
     private final GenerationQuotaPolicy quotaPolicy;
+    private final StructuredAiClient aiClient;
+    private final Duration reviewTimeout;
+    private final ExecutorService generationExecutor;
+    private final ScheduledExecutorService generationCoordinator;
     private final ConcurrentMap<String, ExternalDocumentToolApplication> applications = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, GenerationJobApplication> generationApplications = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, TemplateManagementApplication> templateManagement = new ConcurrentHashMap<>();
@@ -45,7 +56,7 @@ public final class TenantApplicationRegistry implements AutoCloseable {
     public TenantApplicationRegistry(Path dataRoot) {
         this(dataRoot, new NoopGenerationEventPublisher(),
                 new FileGenerationJobRepositoryProvider(dataRoot), new LocalExternalArtifactStoreProvider(),
-                GenerationQuotaPolicy.unlimited());
+                GenerationQuotaPolicy.unlimited(), null);
     }
 
     /**
@@ -56,7 +67,7 @@ public final class TenantApplicationRegistry implements AutoCloseable {
      */
     public TenantApplicationRegistry(Path dataRoot, GenerationEventPublisher eventPublisher) {
         this(dataRoot, eventPublisher, new FileGenerationJobRepositoryProvider(dataRoot),
-                new LocalExternalArtifactStoreProvider(), GenerationQuotaPolicy.unlimited());
+                new LocalExternalArtifactStoreProvider(), GenerationQuotaPolicy.unlimited(), null);
     }
 
     /**
@@ -69,7 +80,7 @@ public final class TenantApplicationRegistry implements AutoCloseable {
     public TenantApplicationRegistry(Path dataRoot, GenerationEventPublisher eventPublisher,
                                      GenerationJobRepositoryProvider jobRepositories) {
         this(dataRoot, eventPublisher, jobRepositories, new LocalExternalArtifactStoreProvider(),
-                GenerationQuotaPolicy.unlimited());
+                GenerationQuotaPolicy.unlimited(), null);
     }
 
     /**
@@ -84,7 +95,7 @@ public final class TenantApplicationRegistry implements AutoCloseable {
                                      GenerationJobRepositoryProvider jobRepositories,
                                      ExternalArtifactStoreProvider artifactStores) {
         this(dataRoot, eventPublisher, jobRepositories, artifactStores,
-                GenerationQuotaPolicy.unlimited());
+                GenerationQuotaPolicy.unlimited(), null);
     }
 
     /**
@@ -100,11 +111,39 @@ public final class TenantApplicationRegistry implements AutoCloseable {
                                      GenerationJobRepositoryProvider jobRepositories,
                                      ExternalArtifactStoreProvider artifactStores,
                                      GenerationQuotaPolicy quotaPolicy) {
+        this(dataRoot, eventPublisher, jobRepositories, artifactStores, quotaPolicy, null);
+    }
+
+    /**
+     * 创建可选启用内部 AI 的完整租户注册表。
+     *
+     * @param dataRoot 服务数据根目录
+     * @param eventPublisher 终态事件发布器
+     * @param jobRepositories 任务仓储提供器
+     * @param artifactStores 工件库提供器
+     * @param quotaPolicy 租户配额策略
+     * @param aiClient 结构化 AI 客户端；为空时不启用 AI 任务模式
+     */
+    public TenantApplicationRegistry(Path dataRoot, GenerationEventPublisher eventPublisher,
+                                     GenerationJobRepositoryProvider jobRepositories,
+                                     ExternalArtifactStoreProvider artifactStores,
+                                     GenerationQuotaPolicy quotaPolicy, StructuredAiClient aiClient) {
+        this(dataRoot, eventPublisher, jobRepositories, artifactStores, quotaPolicy, aiClient,
+                Duration.ofDays(30));
+    }
+
+    /** 创建具有显式 AI 人工审核期限的完整租户注册表。 */
+    public TenantApplicationRegistry(Path dataRoot, GenerationEventPublisher eventPublisher,
+                                     GenerationJobRepositoryProvider jobRepositories,
+                                     ExternalArtifactStoreProvider artifactStores,
+                                     GenerationQuotaPolicy quotaPolicy, StructuredAiClient aiClient,
+                                     Duration reviewTimeout) {
         if (dataRoot == null) {
             throw new IllegalArgumentException("tenant data root is required");
         }
         if (eventPublisher == null || jobRepositories == null || artifactStores == null
-                || quotaPolicy == null) {
+                || quotaPolicy == null || reviewTimeout == null || reviewTimeout.isZero()
+                || reviewTimeout.isNegative()) {
             throw new IllegalArgumentException("generation application dependencies are required");
         }
         this.tenantsRoot = dataRoot.toAbsolutePath().normalize().resolve("tenants");
@@ -112,6 +151,15 @@ public final class TenantApplicationRegistry implements AutoCloseable {
         this.jobRepositories = jobRepositories;
         this.artifactStores = artifactStores;
         this.quotaPolicy = quotaPolicy;
+        this.aiClient = aiClient;
+        this.reviewTimeout = reviewTimeout;
+        this.generationExecutor = BoundedExecutors.fixed(8, 256, "omni-generation",
+                new ThreadPoolExecutor.AbortPolicy());
+        this.generationCoordinator = Executors.newScheduledThreadPool(2, runnable -> {
+            Thread thread = new Thread(runnable, "omni-generation-coordinator");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     /**
@@ -137,7 +185,9 @@ public final class TenantApplicationRegistry implements AutoCloseable {
         ExternalDocumentToolApplication application = require(tenantId);
         return generationApplications.computeIfAbsent(tenantId, value -> new GenerationJobApplication(
                 value, application, jobRepositories.repository(value),
-                eventPublisher, quotaPolicy.quota(value)));
+                eventPublisher, quotaPolicy.quota(value),
+                aiClient == null ? null : application.createInternalAiService(aiClient),
+                generationExecutor, generationCoordinator, reviewTimeout));
     }
 
     /**
@@ -177,6 +227,27 @@ public final class TenantApplicationRegistry implements AutoCloseable {
         return applications.values().stream().mapToInt(application -> application.purgeExpiredArtifacts(now)).sum();
     }
 
+    /** 终结超过审核期限的 AI Generation Job。 */
+    public int expirePendingReviews(Instant now) {
+        return generationApplications.values().stream()
+                .mapToInt(application -> application.expirePendingReviews(now)).sum();
+    }
+
+    /**
+     * 启动时发现持久化队列并创建对应租户 Worker，不依赖新的 HTTP 请求触发恢复。
+     *
+     * @param now 启动时刻
+     * @return 已恢复的租户 Worker 数量
+     */
+    public int recoverPersistedGenerationJobs(Instant now) {
+        int recovered = 0;
+        for (String tenantId : jobRepositories.recoverableTenantIds(now)) {
+            requireGeneration(tenantId);
+            recovered++;
+        }
+        return recovered;
+    }
+
     /** @return 所有关键依赖均就绪时返回 {@code true} */
     public boolean isReady() {
         try {
@@ -205,16 +276,13 @@ public final class TenantApplicationRegistry implements AutoCloseable {
         checks.put("dataDirectory", dataDirectory);
         checks.put("generationRepository", jobRepositories.isReady());
         checks.put("artifactStorage", artifactStores.isReady());
+        if (aiClient != null) checks.put("internalAi", true);
         return checks;
     }
 
     /** @return 所有已加载租户的任务状态汇总 */
     public Map<GenerationJobStatus, Long> generationCounts() {
-        Map<GenerationJobStatus, Long> result = new EnumMap<>(GenerationJobStatus.class);
-        for (GenerationJobStatus status : GenerationJobStatus.values()) result.put(status, 0L);
-        generationApplications.values().forEach(application -> application.countsByStatus()
-                .forEach((status, count) -> result.put(status, result.get(status) + count)));
-        return result;
+        return jobRepositories.countsByStatus();
     }
 
     /**
@@ -227,12 +295,26 @@ public final class TenantApplicationRegistry implements AutoCloseable {
         return requireGeneration(tenantId).countsByStatus();
     }
 
+    /** @return 服务级共享生成 Worker 当前排队任务数 */
+    public int generationWorkerQueueSize() {
+        return generationExecutor instanceof ThreadPoolExecutor
+                ? ((ThreadPoolExecutor) generationExecutor).getQueue().size() : 0;
+    }
+
+    /** @return 服务级共享生成 Worker 当前执行任务数 */
+    public int generationWorkersActive() {
+        return generationExecutor instanceof ThreadPoolExecutor
+                ? ((ThreadPoolExecutor) generationExecutor).getActiveCount() : 0;
+    }
+
     /** 关闭所有租户应用及共享仓储资源。 */
     @Override
     public void close() {
         generationApplications.values().forEach(GenerationJobApplication::close);
         generationApplications.clear();
         templateManagement.clear();
+        generationExecutor.shutdownNow();
+        generationCoordinator.shutdownNow();
         jobRepositories.close();
         artifactStores.close();
     }
@@ -241,12 +323,13 @@ public final class TenantApplicationRegistry implements AutoCloseable {
         Path root = tenantRoot(tenantId);
         FileDocumentTemplateCatalog catalog = new FileDocumentTemplateCatalog(root.resolve("templates"));
         ExternalDocumentToolApplication application = new ExternalDocumentToolApplication(
-                root, catalog, artifactStores.store(tenantId, root));
+                root, catalog, artifactStores.store(tenantId, root), artifactStores.retention());
         registerClasspathTemplate(application, catalog,
                 "/document-template/1.0/example-assessment-template.json");
         registerClasspathTemplate(application, catalog,
                 "/internal-ai/1.0/omni-office-demo-template.json");
-        templateManagement.put(tenantId, new TemplateManagementApplication(catalog));
+        templateManagement.put(tenantId, new TemplateManagementApplication(
+                catalog, application.createTemplatePublicationGate()));
         return application;
     }
 

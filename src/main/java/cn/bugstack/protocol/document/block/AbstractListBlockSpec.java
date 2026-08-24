@@ -10,6 +10,7 @@ public abstract class AbstractListBlockSpec extends BlockSpec {
 
     private List<String> items = new ArrayList<>();
     private String styleName;
+    private String fontColor;
 
     public List<String> getItems() {
         return items;
@@ -25,5 +26,13 @@ public abstract class AbstractListBlockSpec extends BlockSpec {
 
     public void setStyleName(String styleName) {
         this.styleName = styleName;
+    }
+
+    public String getFontColor() {
+        return fontColor;
+    }
+
+    public void setFontColor(String fontColor) {
+        this.fontColor = fontColor;
     }
 }

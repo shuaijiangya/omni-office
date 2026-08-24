@@ -24,7 +24,7 @@ class FunctionCallingDocumentAdapterTest {
         FunctionCallingDocumentAdapter adapter = new FunctionCallingDocumentAdapter(application);
 
         JsonNode tools = mapper.readTree(adapter.listFunctionToolsJson());
-        assertEquals(5, tools.size());
+        assertEquals(8, tools.size());
         assertEquals("function", tools.get(0).path("type").asText());
         assertTrue(tools.get(0).path("function").path("parameters").isObject());
 

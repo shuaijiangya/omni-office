@@ -8,12 +8,29 @@
   "layout": {
     "styleProfile": "DEFAULT",
     "headingNumberingEnabled": true,
-    "bodyTitleEnabled": true,
+    "bodyTitleEnabled": false,
     "tableOfContentsDepth": 3,
     "headerText": "DocumentSpec v1",
     "pageNumberFooterEnabled": true,
-    "bodyPageNumberStart": 1
+    "bodyPageNumberStart": 1,
+    "paperSize": "A4",
+    "orientation": "PORTRAIT",
+    "topMarginPoints": 72,
+    "rightMarginPoints": 54,
+    "bottomMarginPoints": 72,
+    "leftMarginPoints": 54
   },
+  "cover": {
+    "documentName": "DocumentSpec 完整能力示例",
+    "projectName": "Omni Office",
+    "version": "V1.0"
+  },
+  "revisionHistory": [
+    {"version": "V1.0", "date": "2026-08-24", "description": "首次发布", "author": "Omni Office"}
+  ],
+  "approvals": [
+    {"role": "审核", "person": "Reviewer", "date": "2026-08-24"}
+  ],
   "sections": [
     {
       "title": "结构化内容",
@@ -21,7 +38,12 @@
         {
           "type": "paragraph",
           "styleName": "BodyText",
-          "text": "DocumentSpec 允许调用方按受控协议描述文档结构。"
+          "textRanges": [
+            { "text": "DocumentSpec", "style": { "bold": true, "fontColor": "#C00000" } },
+            { "text": " 允许调用方按" },
+            { "text": "受控协议", "style": { "underline": true, "fontColor": "#1F4E79" } },
+            { "text": "描述文档结构。", "style": { "italic": true, "fontSize": 12 } }
+          ]
         },
         {
           "type": "bulletList",
@@ -34,14 +56,30 @@
         {
           "type": "table",
           "styleName": "TableHeader",
+          "alignment": "CENTER",
+          "headerTextStyle": {
+            "asciiFontFamily": "Arial",
+            "farEastFontFamily": "微软雅黑",
+            "fontColor": "#000000",
+            "bold": false
+          },
+          "bodyTextStyle": {
+            "asciiFontFamily": "Calibri",
+            "farEastFontFamily": "仿宋",
+            "fontColor": "#000000"
+          },
           "caption": "DocumentSpec 块类型",
           "captionAutoNumbered": true,
+          "captionPosition": "ABOVE",
           "headers": ["类型", "用途"],
           "columnWidths": [160, 260],
           "rows": [
             ["paragraph", "普通正文段落"],
             ["table", "结构化表格"],
-            ["subsection", "递归子章节"]
+            ["", "递归子章节"]
+          ],
+          "merges": [
+            { "startRow": 2, "startColumn": 0, "rowSpan": 2, "columnSpan": 1 }
           ]
         },
         {

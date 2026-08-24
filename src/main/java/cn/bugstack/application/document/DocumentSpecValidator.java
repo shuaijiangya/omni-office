@@ -16,6 +16,9 @@ import cn.bugstack.protocol.document.block.PageBreakBlockSpec;
 import cn.bugstack.protocol.document.block.ParagraphBlockSpec;
 import cn.bugstack.protocol.document.block.SubsectionBlockSpec;
 import cn.bugstack.protocol.document.block.TableBlockSpec;
+import cn.bugstack.protocol.document.block.TableMergeSpec;
+import cn.bugstack.protocol.document.block.TextRangeSpec;
+import cn.bugstack.protocol.document.block.TextRangeStyleSpec;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,6 +39,10 @@ public final class DocumentSpecValidator {
             "TableNormal", "TableHeader", "TableCell"));
     private static final Set<String> DIAGRAM_EMBED_MODES = new HashSet<>(Arrays.asList(
             "PREVIEW_IMAGE", "EDITABLE_VISIO"));
+    private static final Set<String> TABLE_ALIGNMENTS = new HashSet<>(Arrays.asList(
+            "LEFT", "CENTER", "RIGHT"));
+    private static final Set<String> CAPTION_POSITIONS = new HashSet<>(Arrays.asList(
+            "ABOVE", "BELOW"));
 
     private final DocumentSpecLimits limits;
     private final boolean diagramEnabled;
@@ -81,6 +88,7 @@ public final class DocumentSpecValidator {
             validateText(spec.getMetadata().getSubject(), "/metadata/subject", false, state);
         }
         validateLayout(spec.getLayout(), state);
+        validateFrontMatter(spec, state);
         if (spec.getSections() == null || spec.getSections().isEmpty()) {
             state.add("/sections", "REQUIRED", "document must contain at least one section");
         } else {
@@ -115,6 +123,57 @@ public final class DocumentSpecValidator {
         }
         validateText(layout.getHeaderText(), "/layout/headerText", false, state);
         validateText(layout.getFooterText(), "/layout/footerText", false, state);
+        if (!Arrays.asList("A4", "A3", "LETTER").contains(layout.getPaperSize())) {
+            state.add("/layout/paperSize", "INVALID_ENUM", "paperSize must be A4, A3 or LETTER");
+        }
+        if (!Arrays.asList("PORTRAIT", "LANDSCAPE").contains(layout.getOrientation())) {
+            state.add("/layout/orientation", "INVALID_ENUM", "orientation must be PORTRAIT or LANDSCAPE");
+        }
+        validateMargin(layout.getTopMarginPoints(), "/layout/topMarginPoints", state);
+        validateMargin(layout.getRightMarginPoints(), "/layout/rightMarginPoints", state);
+        validateMargin(layout.getBottomMarginPoints(), "/layout/bottomMarginPoints", state);
+        validateMargin(layout.getLeftMarginPoints(), "/layout/leftMarginPoints", state);
+    }
+
+    private void validateFrontMatter(DocumentSpec spec, ValidationState state) {
+        if (spec.getCover() != null) {
+            validateText(spec.getCover().getDocumentName(), "/cover/documentName", true, state);
+            validateText(spec.getCover().getProjectName(), "/cover/projectName", true, state);
+            validateText(spec.getCover().getVersion(), "/cover/version", true, state);
+        }
+        if (spec.getRevisionHistory() != null) {
+            if (spec.getRevisionHistory().size() > 100) {
+                state.add("/revisionHistory", "LIMIT_EXCEEDED", "revision history exceeds 100 entries");
+            }
+            for (int i = 0; i < spec.getRevisionHistory().size(); i++) {
+                cn.bugstack.protocol.document.DocumentRevisionSpec item = spec.getRevisionHistory().get(i);
+                String path = "/revisionHistory/" + i;
+                if (item == null) { state.add(path, "REQUIRED", "revision entry is required"); continue; }
+                validateText(item.getVersion(), path + "/version", true, state);
+                validateText(item.getDate(), path + "/date", true, state);
+                validateText(item.getDescription(), path + "/description", true, state);
+                validateText(item.getAuthor(), path + "/author", true, state);
+            }
+        }
+        if (spec.getApprovals() != null) {
+            if (spec.getApprovals().size() > 100) {
+                state.add("/approvals", "LIMIT_EXCEEDED", "approval list exceeds 100 entries");
+            }
+            for (int i = 0; i < spec.getApprovals().size(); i++) {
+                cn.bugstack.protocol.document.DocumentApprovalSpec item = spec.getApprovals().get(i);
+                String path = "/approvals/" + i;
+                if (item == null) { state.add(path, "REQUIRED", "approval entry is required"); continue; }
+                validateText(item.getRole(), path + "/role", true, state);
+                validateText(item.getPerson(), path + "/person", true, state);
+                validateText(item.getDate(), path + "/date", true, state);
+            }
+        }
+    }
+
+    private void validateMargin(double value, String path, ValidationState state) {
+        if (!Double.isFinite(value) || value < 0D || value > 288D) {
+            state.add(path, "OUT_OF_RANGE", "page margin must be between 0 and 288 points");
+        }
     }
 
     private void validateSection(SectionSpec section, String path, int depth, ValidationState state) {
@@ -152,15 +211,18 @@ public final class DocumentSpecValidator {
                 state.add(blockPath, "REQUIRED", "block must not be null");
             } else if (block instanceof ParagraphBlockSpec) {
                 ParagraphBlockSpec paragraph = (ParagraphBlockSpec) block;
-                validateText(paragraph.getText(), blockPath + "/text", true, state);
+                validateParagraphContent(paragraph, blockPath, state);
                 validateParagraphStyle(paragraph.getStyleName(), blockPath + "/styleName", state);
+                validateFontColor(paragraph.getFontColor(), blockPath + "/fontColor", state);
             } else if (block instanceof AbstractListBlockSpec) {
                 validateList((AbstractListBlockSpec) block, blockPath, state);
             } else if (block instanceof TableBlockSpec) {
                 validateTable((TableBlockSpec) block, blockPath, state);
             } else if (block instanceof ImageBlockSpec) {
+                countMedia(blockPath, state);
                 validateImage((ImageBlockSpec) block, blockPath, state);
             } else if (block instanceof DiagramBlockSpec) {
+                countMedia(blockPath, state);
                 validateDiagram((DiagramBlockSpec) block, blockPath, state);
             } else if (block instanceof SubsectionBlockSpec) {
                 SubsectionBlockSpec subsection = (SubsectionBlockSpec) block;
@@ -173,8 +235,50 @@ public final class DocumentSpecValidator {
         }
     }
 
+    /** 校验单文本与多文本范围互斥，并校验每个范围的内容和样式。 */
+    private void validateParagraphContent(ParagraphBlockSpec paragraph, String path, ValidationState state) {
+        boolean hasSingleText = hasText(paragraph.getText());
+        boolean hasRanges = paragraph.getTextRanges() != null && !paragraph.getTextRanges().isEmpty();
+        if (hasSingleText == hasRanges) {
+            state.add(path, "ONE_OF_REQUIRED", "exactly one of text and textRanges must be configured");
+            return;
+        }
+        if (hasSingleText) {
+            validateText(paragraph.getText(), path + "/text", true, state);
+            return;
+        }
+        if (paragraph.getTextRanges().size() > limits.getMaxListItems()) {
+            state.add(path + "/textRanges", "LIMIT_EXCEEDED",
+                    "text range count exceeds " + limits.getMaxListItems());
+        }
+        for (int index = 0; index < paragraph.getTextRanges().size(); index++) {
+            TextRangeSpec range = paragraph.getTextRanges().get(index);
+            String rangePath = path + "/textRanges/" + index;
+            if (range == null) {
+                state.add(rangePath, "REQUIRED", "text range must not be null");
+                continue;
+            }
+            validateText(range.getText(), rangePath + "/text", true, state);
+            validateTextRangeStyle(range.getStyle(), rangePath + "/style", state);
+        }
+    }
+
+    /** 校验文本范围的字体、字号、颜色和文字效果。 */
+    private void validateTextRangeStyle(TextRangeStyleSpec style, String path, ValidationState state) {
+        if (style == null) return;
+        validateFontFamily(style.getFontFamily(), path + "/fontFamily", "fontFamily", state);
+        validateFontFamily(style.getAsciiFontFamily(), path + "/asciiFontFamily", "asciiFontFamily", state);
+        validateFontFamily(style.getFarEastFontFamily(), path + "/farEastFontFamily", "farEastFontFamily", state);
+        if (style.getFontSize() != null && (!Double.isFinite(style.getFontSize())
+                || style.getFontSize() < 1 || style.getFontSize() > 200)) {
+            state.add(path + "/fontSize", "OUT_OF_RANGE", "fontSize must be between 1 and 200 points");
+        }
+        validateFontColor(style.getFontColor(), path + "/fontColor", state);
+    }
+
     private void validateList(AbstractListBlockSpec list, String path, ValidationState state) {
         validateParagraphStyle(list.getStyleName(), path + "/styleName", state);
+        validateFontColor(list.getFontColor(), path + "/fontColor", state);
         if (list.getItems() == null || list.getItems().isEmpty()) {
             state.add(path + "/items", "REQUIRED", "list must contain at least one item");
             return;
@@ -189,6 +293,13 @@ public final class DocumentSpecValidator {
     }
 
     private void validateTable(TableBlockSpec table, String path, ValidationState state) {
+        validateFontColor(table.getFontColor(), path + "/fontColor", state);
+        validateTextRangeStyle(table.getHeaderTextStyle(), path + "/headerTextStyle", state);
+        validateTextRangeStyle(table.getBodyTextStyle(), path + "/bodyTextStyle", state);
+        validateEnum(table.getAlignment(), TABLE_ALIGNMENTS, path + "/alignment",
+                "table alignment must be LEFT, CENTER or RIGHT", state);
+        validateEnum(table.getCaptionPosition(), CAPTION_POSITIONS, path + "/captionPosition",
+                "captionPosition must be ABOVE or BELOW", state);
         List<String> headers = table.getHeaders();
         if (headers == null || headers.isEmpty()) {
             state.add(path + "/headers", "REQUIRED", "table headers must not be empty");
@@ -198,8 +309,16 @@ public final class DocumentSpecValidator {
             state.add(path + "/headers", "LIMIT_EXCEEDED",
                     "table column count exceeds " + limits.getMaxTableColumns());
         }
+        int rows = table.getRows() == null ? 0 : table.getRows().size();
+        MergeCoverage mergeCoverage = validateTableMerges(table.getMerges(), rows + 1,
+                headers.size(), path + "/merges", state);
+        state.tableCellCount += headers.size() * (long) (rows + 1);
+        if (state.tableCellCount > limits.getMaxTableCells() && !state.tableCellLimitReported) {
+            state.tableCellLimitReported = true;
+            state.add(path, "LIMIT_EXCEEDED", "total table cell count exceeds " + limits.getMaxTableCells());
+        }
         for (int i = 0; i < headers.size(); i++) {
-            validateText(headers.get(i), path + "/headers/" + i, true, state);
+            validateTableCell(headers.get(i), 0, i, path + "/headers/" + i, mergeCoverage, state);
         }
         if (table.getRows() != null && table.getRows().size() > limits.getMaxTableRows()) {
             state.add(path + "/rows", "LIMIT_EXCEEDED",
@@ -216,11 +335,7 @@ public final class DocumentSpecValidator {
                 for (int columnIndex = 0; columnIndex < row.size(); columnIndex++) {
                     String cell = row.get(columnIndex);
                     String cellPath = path + "/rows/" + rowIndex + "/" + columnIndex;
-                    if (cell == null) {
-                        state.add(cellPath, "REQUIRED", "table cell must not be null");
-                    } else {
-                        validateText(cell, cellPath, false, state);
-                    }
+                    validateTableCell(cell, rowIndex + 1, columnIndex, cellPath, mergeCoverage, state);
                 }
             }
         }
@@ -243,10 +358,93 @@ public final class DocumentSpecValidator {
         validateText(table.getCaption(), path + "/caption", false, state);
     }
 
+    /** 校验矩形合并区域，并建立逻辑单元格覆盖关系。 */
+    private MergeCoverage validateTableMerges(List<TableMergeSpec> merges, int rowCount, int columnCount,
+                                              String path, ValidationState state) {
+        MergeCoverage coverage = new MergeCoverage(rowCount, columnCount);
+        if (merges == null) {
+            state.add(path, "REQUIRED", "table merges must not be null");
+            return coverage;
+        }
+        for (int index = 0; index < merges.size(); index++) {
+            TableMergeSpec merge = merges.get(index);
+            String mergePath = path + "/" + index;
+            if (merge == null) {
+                state.add(mergePath, "REQUIRED", "table merge must not be null");
+                continue;
+            }
+            if (merge.getStartRow() < 0 || merge.getStartColumn() < 0
+                    || merge.getRowSpan() < 1 || merge.getColumnSpan() < 1) {
+                state.add(mergePath, "OUT_OF_RANGE", "table merge coordinates and spans are out of range");
+                continue;
+            }
+            if (merge.getRowSpan() == 1 && merge.getColumnSpan() == 1) {
+                state.add(mergePath, "INVALID_MERGE", "table merge must span multiple rows or columns");
+                continue;
+            }
+            if (merge.getStartRow() + merge.getRowSpan() > rowCount
+                    || merge.getStartColumn() + merge.getColumnSpan() > columnCount) {
+                state.add(mergePath, "OUT_OF_RANGE", "table merge exceeds the table boundary");
+                continue;
+            }
+            boolean overlaps = false;
+            for (int row = merge.getStartRow(); row < merge.getStartRow() + merge.getRowSpan(); row++) {
+                for (int column = merge.getStartColumn();
+                     column < merge.getStartColumn() + merge.getColumnSpan(); column++) {
+                    overlaps |= coverage.covered[row][column];
+                }
+            }
+            if (overlaps) {
+                state.add(mergePath, "OVERLAPPING_MERGE", "table merge overlaps another merge region");
+                continue;
+            }
+            for (int row = merge.getStartRow(); row < merge.getStartRow() + merge.getRowSpan(); row++) {
+                for (int column = merge.getStartColumn();
+                     column < merge.getStartColumn() + merge.getColumnSpan(); column++) {
+                    coverage.covered[row][column] = true;
+                }
+            }
+            coverage.anchors[merge.getStartRow()][merge.getStartColumn()] = true;
+        }
+        return coverage;
+    }
+
+    /** 校验普通、合并起点及合并后续单元格的内容约束。 */
+    private void validateTableCell(String value, int row, int column, String path,
+                                   MergeCoverage coverage, ValidationState state) {
+        if (value == null) {
+            state.add(path, "REQUIRED", "table cell must not be null");
+            return;
+        }
+        if (coverage.isFollower(row, column)) {
+            if (hasText(value)) {
+                state.add(path, "MERGED_CELL_MUST_BE_EMPTY",
+                        "only the top-left cell of a merge region may contain text");
+            }
+            return;
+        }
+        validateText(value, path, row == 0, state);
+    }
+
     private void validateImage(ImageBlockSpec image, String path, ValidationState state) {
-        validateText(image.getSource(), path + "/source", true, state);
+        boolean hasSource = hasText(image.getSource());
+        boolean hasAssetId = hasText(image.getAssetId());
+        if (hasSource == hasAssetId) {
+            state.add(path, "ONE_OF_REQUIRED", "exactly one of source and assetId must be configured");
+        }
+        if (hasSource) validateText(image.getSource(), path + "/source", true, state);
+        if (hasAssetId) {
+            validateText(image.getAssetId(), path + "/assetId", true, state);
+            try {
+                java.util.UUID.fromString(image.getAssetId());
+            } catch (IllegalArgumentException e) {
+                state.add(path + "/assetId", "INVALID_FORMAT", "image assetId must be a UUID");
+            }
+        }
         validateText(image.getAlternativeText(), path + "/alternativeText", false, state);
         validateText(image.getCaption(), path + "/caption", false, state);
+        validateEnum(image.getCaptionPosition(), CAPTION_POSITIONS, path + "/captionPosition",
+                "captionPosition must be ABOVE or BELOW", state);
         if ((image.getWidth() == null) != (image.getHeight() == null)) {
             state.add(path, "DIMENSION_MISMATCH", "image width and height must be configured together");
         } else if (image.getWidth() != null && (image.getWidth() <= 0 || image.getHeight() <= 0)) {
@@ -274,6 +472,9 @@ public final class DocumentSpecValidator {
         if (!DIAGRAM_EMBED_MODES.contains(diagram.getEmbedMode())) {
             state.add(path + "/embedMode", "INVALID_ENUM", "unsupported diagram embed mode");
         }
+        validateText(diagram.getCaption(), path + "/caption", false, state);
+        validateEnum(diagram.getCaptionPosition(), CAPTION_POSITIONS, path + "/captionPosition",
+                "captionPosition must be ABOVE or BELOW", state);
         if ((diagram.getMaxWidthPoints() == null) != (diagram.getMaxHeightPoints() == null)) {
             state.add(path, "DIMENSION_MISMATCH", "diagram width and height must be configured together");
         } else if (diagram.getMaxWidthPoints() != null
@@ -292,6 +493,28 @@ public final class DocumentSpecValidator {
         }
     }
 
+    /** 校验可选的六位十六进制字体颜色。 */
+    private void validateFontColor(String color, String path, ValidationState state) {
+        if (hasText(color) && !color.matches("#[0-9A-Fa-f]{6}")) {
+            state.add(path, "INVALID_FORMAT", "fontColor must use #RRGGBB format");
+        }
+    }
+
+    /** 校验可选字体名称。 */
+    private void validateFontFamily(String fontFamily, String path, String fieldName, ValidationState state) {
+        if (fontFamily != null && (!hasText(fontFamily) || fontFamily.length() > 200)) {
+            state.add(path, "INVALID_FORMAT", fieldName + " must be non-blank and at most 200 characters");
+        }
+    }
+
+    /** 校验字符串枚举字段。 */
+    private void validateEnum(String value, Set<String> allowed, String path, String message,
+                              ValidationState state) {
+        if (!allowed.contains(value)) {
+            state.add(path, "INVALID_ENUM", message);
+        }
+    }
+
     private void validateText(String value, String path, boolean required, ValidationState state) {
         if (!hasText(value)) {
             if (required) {
@@ -301,6 +524,20 @@ public final class DocumentSpecValidator {
         }
         if (value.length() > limits.getMaxTextLength()) {
             state.add(path, "LIMIT_EXCEEDED", "text length exceeds " + limits.getMaxTextLength());
+        }
+        state.totalTextLength += value.length();
+        if (state.totalTextLength > limits.getMaxTotalTextLength() && !state.textLimitReported) {
+            state.textLimitReported = true;
+            state.add(path, "LIMIT_EXCEEDED",
+                    "total document text length exceeds " + limits.getMaxTotalTextLength());
+        }
+    }
+
+    private void countMedia(String path, ValidationState state) {
+        state.mediaCount++;
+        if (state.mediaCount > limits.getMaxMediaBlocks() && !state.mediaLimitReported) {
+            state.mediaLimitReported = true;
+            state.add(path, "LIMIT_EXCEEDED", "media block count exceeds " + limits.getMaxMediaBlocks());
         }
     }
 
@@ -313,6 +550,12 @@ public final class DocumentSpecValidator {
         private final List<DocumentSpecViolation> violations = new ArrayList<>();
         private int sectionCount;
         private int blockCount;
+        private long totalTextLength;
+        private long tableCellCount;
+        private int mediaCount;
+        private boolean textLimitReported;
+        private boolean tableCellLimitReported;
+        private boolean mediaLimitReported;
 
         private void add(String path, String code, String message) {
             violations.add(new DocumentSpecViolation(path, code, message));
@@ -320,6 +563,23 @@ public final class DocumentSpecValidator {
 
         private DocumentSpecValidationResult result() {
             return new DocumentSpecValidationResult(violations);
+        }
+    }
+
+    /** 表格合并覆盖矩阵。 */
+    private static final class MergeCoverage {
+
+        private final boolean[][] covered;
+        private final boolean[][] anchors;
+
+        private MergeCoverage(int rows, int columns) {
+            this.covered = new boolean[rows][columns];
+            this.anchors = new boolean[rows][columns];
+        }
+
+        private boolean isFollower(int row, int column) {
+            return row < covered.length && column < covered[row].length
+                    && covered[row][column] && !anchors[row][column];
         }
     }
 }

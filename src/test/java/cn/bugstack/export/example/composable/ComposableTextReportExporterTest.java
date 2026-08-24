@@ -33,7 +33,6 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -91,7 +90,7 @@ class ComposableTextReportExporterTest {
         assertTrue(document.getText().contains("V2.0"));
         assertTrue(coverSection.getText().contains("动态组合报告"));
         assertTrue(tableOfContentsSection.getText().replace(" ", "").contains("目录"));
-        assertEquals(0, coverSection.getHeadersFooters().getCount());
+        assertNoBusinessHeaderFooter(coverSection, document);
         HeaderFooter tableOfContentsFooter = tableOfContentsSection.getHeadersFooters()
                 .getByHeaderFooterType(HeaderFooterType.FOOTER_PRIMARY);
         HeaderFooter moduleFooter = moduleSection.getHeadersFooters()
@@ -176,8 +175,7 @@ class ComposableTextReportExporterTest {
 
         assertEquals(3, document.getSections().getCount());
         for (Section section : document.getSections()) {
-            assertNull(section.getHeadersFooters()
-                    .getByHeaderFooterType(HeaderFooterType.HEADER_PRIMARY));
+            assertNoBusinessPrimaryHeader(section, document);
         }
         assertTrue(document.getSections().get(2).getText().contains("无页眉正文"));
     }
@@ -321,6 +319,46 @@ class ComposableTextReportExporterTest {
             }
         }
         return false;
+    }
+
+    /** 验证 Section 不含业务页眉页脚，同时兼容 Aspose.Words 评估版自动水印节点。 */
+    private void assertNoBusinessHeaderFooter(Section section, Document document) throws Exception {
+        if (!hasAsposeEvaluationMarker(document)) {
+            assertEquals(0, section.getHeadersFooters().getCount());
+            return;
+        }
+        for (HeaderFooter value : section.getHeadersFooters()) {
+            assertTrue(withoutEvaluationMarker(value.getText()).isBlank(),
+                    "unexpected header/footer content: " + value.getText());
+        }
+    }
+
+    /** 验证未配置业务页眉；评估版创建的空白水印页眉不视为业务页眉。 */
+    private void assertNoBusinessPrimaryHeader(Section section, Document document) throws Exception {
+        HeaderFooter header = section.getHeadersFooters()
+                .getByHeaderFooterType(HeaderFooterType.HEADER_PRIMARY);
+        if (header == null) return;
+        assertTrue(hasAsposeEvaluationMarker(document), "unexpected primary header node");
+        assertTrue(withoutEvaluationMarker(header.getText()).isBlank(),
+                "unexpected primary header content: " + header.getText());
+    }
+
+    /** 判断文档是否包含 Aspose.Words 评估版自动生成的明确标识。 */
+    private boolean hasAsposeEvaluationMarker(Document document) throws Exception {
+        for (Section section : document.getSections()) {
+            for (HeaderFooter value : section.getHeadersFooters()) {
+                if (value.getText().contains("Evaluation Only. Created with Aspose.Words.")) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 去除唯一允许忽略的 Aspose.Words 评估版标识及 Word 控制字符。 */
+    private String withoutEvaluationMarker(String value) {
+        return value.replaceAll("Evaluation Only\\. Created with Aspose\\.Words\\. "
+                        + "Copyright 2003-\\d{4} Aspose Pty Ltd\\.", "")
+                .replaceAll("[\\x00-\\x1F]", "")
+                .trim();
     }
 
     /**

@@ -3,6 +3,7 @@ package cn.bugstack.application.generation;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Map;
 
 /** Generation Job 的持久化边界；生产实现可替换为 PostgreSQL。 */
 public interface GenerationJobRepository {
@@ -117,4 +118,29 @@ public interface GenerationJobRepository {
      */
     List<GenerationJobRecord> list(GenerationJobStatus status, Instant beforeCreatedAt,
                                    String beforeJobId, int limit);
+
+    /**
+     * 按所属主体稳定分页，供默认主体私有的 REST 授权边界使用。
+     *
+     * @param principalId 所属主体 ID
+     * @param status 可选状态过滤条件
+     * @param beforeCreatedAt 游标中的创建时刻
+     * @param beforeJobId 游标中的任务 ID
+     * @param limit 最大返回数量
+     * @return 当前主体的任务快照
+     */
+    List<GenerationJobRecord> listForPrincipal(String principalId, GenerationJobStatus status,
+                                               Instant beforeCreatedAt, String beforeJobId, int limit);
+
+    /** @return 当前租户各任务状态数量，由生产仓储使用聚合查询实现 */
+    Map<GenerationJobStatus, Long> countsByStatus();
+
+    /**
+     * 分批清理截止时间之前的终态任务。
+     *
+     * @param cutoff 截止时间
+     * @param limit 单批最大删除数
+     * @return 删除数量
+     */
+    int purgeTerminalBefore(Instant cutoff, int limit);
 }

@@ -20,8 +20,23 @@ public class ReportTable implements ReportElement {
     /** 表格样式名称。 */
     private String styleName;
 
-    /** 表格列宽，单位由目标格式编译器解释。 */
+    /** 表格列宽比例权重；表格总宽度由目标页面正文宽度自适应。 */
     private double[] columnWidths = new double[0];
+
+    /** 表格水平对齐方式。 */
+    private ReportTableAlignment alignment = ReportTableAlignment.LEFT;
+
+    /** 表格矩形合并区域。 */
+    private List<ReportTableMerge> merges = new ArrayList<>();
+
+    /** 表格内文本的可选字体颜色。 */
+    private String fontColor;
+
+    /** 当前表格可选的表头文本样式覆盖。 */
+    private ReportTextRangeStyle headerTextStyle;
+
+    /** 当前表格可选的表内容文本样式覆盖。 */
+    private ReportTextRangeStyle bodyTextStyle;
 
     /**
      * 获取当前元素的类型。
@@ -108,7 +123,7 @@ public class ReportTable implements ReportElement {
     /**
      * 获取表格列宽。
      *
-     * @return 列宽数组副本
+     * @return 列宽比例权重数组副本
      */
     public double[] getColumnWidths() {
         return columnWidths.clone();
@@ -117,9 +132,53 @@ public class ReportTable implements ReportElement {
     /**
      * 设置表格列宽。
      *
-     * @param columnWidths 列宽数组
+     * @param columnWidths 列宽比例权重数组
      */
     public void setColumnWidths(double[] columnWidths) {
         this.columnWidths = columnWidths == null ? new double[0] : columnWidths.clone();
+    }
+
+    public ReportTableAlignment getAlignment() {
+        return alignment;
+    }
+
+    public void setAlignment(ReportTableAlignment alignment) {
+        this.alignment = alignment == null ? ReportTableAlignment.LEFT : alignment;
+    }
+
+    public List<ReportTableMerge> getMerges() {
+        return merges;
+    }
+
+    public void setMerges(List<ReportTableMerge> merges) {
+        this.merges = merges == null ? new ArrayList<>() : merges;
+    }
+
+    public String getFontColor() {
+        return fontColor;
+    }
+
+    public void setFontColor(String fontColor) {
+        this.fontColor = fontColor;
+    }
+
+    /** @return 当前表格的表头文本样式覆盖 */
+    public ReportTextRangeStyle getHeaderTextStyle() {
+        return headerTextStyle;
+    }
+
+    /** @param headerTextStyle 表头文本样式覆盖 */
+    public void setHeaderTextStyle(ReportTextRangeStyle headerTextStyle) {
+        this.headerTextStyle = headerTextStyle;
+    }
+
+    /** @return 当前表格的表内容文本样式覆盖 */
+    public ReportTextRangeStyle getBodyTextStyle() {
+        return bodyTextStyle;
+    }
+
+    /** @param bodyTextStyle 表内容文本样式覆盖 */
+    public void setBodyTextStyle(ReportTextRangeStyle bodyTextStyle) {
+        this.bodyTextStyle = bodyTextStyle;
     }
 }

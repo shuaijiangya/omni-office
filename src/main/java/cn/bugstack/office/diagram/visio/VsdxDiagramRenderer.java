@@ -179,10 +179,36 @@ public final class VsdxDiagramRenderer implements VisioDiagramRenderer {
             throws IOException {
         ensureParentDirectory(vsdxPath);
         ensureParentDirectory(previewPngPath);
+        Canvas canvas = canvasFor(definition);
+        Diagram diagram = compose(definition, canvas);
+        try {
+            diagram.save(vsdxPath.toString(), SaveFileFormat.VSDX);
+            savePreview(definition, previewPngPath, canvas, diagram);
+            return new VisioDiagramArtifact(definition.getType(), vsdxPath, previewPngPath);
+        } catch (Exception exception) {
+            throw new IOException("render editable Visio diagram failed: " + vsdxPath, exception);
+        } finally {
+            diagram.dispose();
+        }
+    }
+
+    /**
+     * 在内存中组装完整的可编辑 Diagram，供同包结构测试在保存前验证全部 Shape。
+     * 调用方负责在使用完成后调用 {@link Diagram#dispose()}。
+     *
+     * @param definition 图语义定义
+     * @return 尚未经过文件保存的完整 Diagram
+     * @throws IOException 当图类型不受支持或组装失败时抛出
+     */
+    Diagram compose(DiagramDefinition definition) throws IOException {
+        return compose(definition, canvasFor(definition));
+    }
+
+    /** 使用已经计算的画布组装内存 Diagram。 */
+    private Diagram compose(DiagramDefinition definition, Canvas canvas) throws IOException {
         Diagram diagram = new Diagram();
         try {
             Page page = diagram.getPages().getPage(0);
-            Canvas canvas = canvasFor(definition);
             configurePage(page, canvas);
             renderTitle(page, definition.getTitle(), canvas);
             switch (definition.getType()) {
@@ -210,13 +236,11 @@ public final class VsdxDiagramRenderer implements VisioDiagramRenderer {
                 default:
                     throw new IOException("unsupported editable Visio diagram type: " + definition.getType());
             }
-            diagram.save(vsdxPath.toString(), SaveFileFormat.VSDX);
-            savePreview(definition, previewPngPath, canvas, diagram);
-            return new VisioDiagramArtifact(definition.getType(), vsdxPath, previewPngPath);
+            return diagram;
         } catch (Exception exception) {
-            throw new IOException("render editable Visio diagram failed: " + vsdxPath, exception);
-        } finally {
             diagram.dispose();
+            if (exception instanceof IOException) throw (IOException) exception;
+            throw new IOException("compose editable Visio diagram failed", exception);
         }
     }
 

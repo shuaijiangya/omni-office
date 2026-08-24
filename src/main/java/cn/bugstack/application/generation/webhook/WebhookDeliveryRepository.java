@@ -84,4 +84,24 @@ public interface WebhookDeliveryRepository {
                 result.put(item.getStatus(), result.get(item.getStatus()) + 1L));
         return result;
     }
+
+    /**
+     * 将 DEAD 事件重新加入投递队列，并在保留累计尝试次数的前提下增加重试预算。
+     *
+     * @param tenantId 租户 ID
+     * @param eventId 事件 ID
+     * @param now 重放时间
+     * @param additionalAttempts 新增重试次数
+     * @return 重放后的事件
+     */
+    WebhookDeliveryRecord redrive(String tenantId, String eventId, Instant now, int additionalAttempts);
+
+    /**
+     * 分批清理截止时间之前的 DELIVERED/DEAD 记录。
+     *
+     * @param cutoff 截止时间
+     * @param limit 单批最大删除数
+     * @return 删除数量
+     */
+    int purgeTerminalBefore(Instant cutoff, int limit);
 }

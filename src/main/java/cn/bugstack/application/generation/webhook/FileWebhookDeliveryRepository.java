@@ -144,6 +144,57 @@ public final class FileWebhookDeliveryRepository implements WebhookDeliveryRepos
         return result;
     }
 
+    @Override
+    public synchronized WebhookDeliveryRecord redrive(String tenantId, String eventId, Instant now,
+                                                       int additionalAttempts) {
+        if (tenantId == null || now == null || additionalAttempts < 1 || additionalAttempts > 20) {
+            throw new IllegalArgumentException("webhook redrive request is invalid");
+        }
+        Path target = path(eventId);
+        if (!Files.isRegularFile(target)) throw new IllegalArgumentException("webhook event does not exist");
+        WebhookDeliveryRecord value = read(target);
+        if (!tenantId.equals(value.getTenantId())) throw new IllegalArgumentException("webhook event does not exist");
+        if (value.getStatus() != WebhookDeliveryStatus.DEAD) {
+            throw new IllegalStateException("only DEAD webhook events can be redriven");
+        }
+        if (value.getAttemptCount() >= 20) {
+            throw new IllegalStateException("webhook event reached the maximum redrive attempt budget");
+        }
+        value.setStatus(WebhookDeliveryStatus.RETRYING);
+        value.setMaxAttempts(Math.min(20, value.getAttemptCount() + additionalAttempts));
+        value.setResponseStatus(null);
+        value.setLastError(null);
+        value.setNextAttemptAt(now);
+        value.setDeliveredAt(null);
+        value.setLeaseOwner(null);
+        value.setLeaseUntil(null);
+        value.setUpdatedAt(now);
+        value.setVersion(value.getVersion() + 1L);
+        write(value, target, false);
+        return copy(value);
+    }
+
+    @Override
+    public synchronized int purgeTerminalBefore(Instant cutoff, int limit) {
+        if (cutoff == null || limit < 1 || limit > 10_000) {
+            throw new IllegalArgumentException("webhook purge boundary is invalid");
+        }
+        List<WebhookDeliveryRecord> candidates = readAll().stream()
+                .filter(item -> item.getStatus().isTerminal())
+                .filter(item -> !item.getUpdatedAt().isAfter(cutoff))
+                .sorted(Comparator.comparing(WebhookDeliveryRecord::getUpdatedAt))
+                .limit(limit).collect(java.util.stream.Collectors.toList());
+        int deleted = 0;
+        for (WebhookDeliveryRecord candidate : candidates) {
+            try {
+                if (Files.deleteIfExists(path(candidate.getEventId()))) deleted++;
+            } catch (IOException e) {
+                throw new IllegalStateException("failed to purge webhook event", e);
+            }
+        }
+        return deleted;
+    }
+
     private List<WebhookDeliveryRecord> readAll() {
         List<WebhookDeliveryRecord> result = new ArrayList<>();
         try (Stream<Path> paths = Files.list(root)) {

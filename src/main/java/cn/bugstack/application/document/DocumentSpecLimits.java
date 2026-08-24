@@ -12,9 +12,20 @@ public final class DocumentSpecLimits {
     private final int maxListItems;
     private final int maxTableRows;
     private final int maxTableColumns;
+    private final int maxTotalTextLength;
+    private final int maxTableCells;
+    private final int maxMediaBlocks;
 
     public DocumentSpecLimits(int maxSections, int maxSectionDepth, int maxBlocks, int maxTextLength,
                               int maxListItems, int maxTableRows, int maxTableColumns) {
+        this(maxSections, maxSectionDepth, maxBlocks, maxTextLength, maxListItems, maxTableRows,
+                maxTableColumns, 2_000_000, 100_000, 200);
+    }
+
+    /** 创建包含结构上限和整份文档累计成本上限的配置。 */
+    public DocumentSpecLimits(int maxSections, int maxSectionDepth, int maxBlocks, int maxTextLength,
+                              int maxListItems, int maxTableRows, int maxTableColumns,
+                              int maxTotalTextLength, int maxTableCells, int maxMediaBlocks) {
         this.maxSections = positive(maxSections, "max sections");
         this.maxSectionDepth = positive(maxSectionDepth, "max section depth");
         this.maxBlocks = positive(maxBlocks, "max blocks");
@@ -22,6 +33,9 @@ public final class DocumentSpecLimits {
         this.maxListItems = positive(maxListItems, "max list items");
         this.maxTableRows = positive(maxTableRows, "max table rows");
         this.maxTableColumns = positive(maxTableColumns, "max table columns");
+        this.maxTotalTextLength = positive(maxTotalTextLength, "max total text length");
+        this.maxTableCells = positive(maxTableCells, "max table cells");
+        this.maxMediaBlocks = positive(maxMediaBlocks, "max media blocks");
     }
 
     public static DocumentSpecLimits defaults() {
@@ -55,6 +69,10 @@ public final class DocumentSpecLimits {
     public int getMaxTableColumns() {
         return maxTableColumns;
     }
+
+    public int getMaxTotalTextLength() { return maxTotalTextLength; }
+    public int getMaxTableCells() { return maxTableCells; }
+    public int getMaxMediaBlocks() { return maxMediaBlocks; }
 
     private static int positive(int value, String name) {
         if (value < 1) {

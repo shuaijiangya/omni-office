@@ -5,9 +5,11 @@ import cn.bugstack.office.docx.style.DocxLineSpacingRule;
 import cn.bugstack.office.docx.style.DocxParagraphAlignment;
 import cn.bugstack.office.docx.style.ParagraphStyle;
 import cn.bugstack.office.docx.style.StyleRegistry;
+import cn.bugstack.office.docx.style.TableStyle;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -84,5 +86,28 @@ class StyleRegistryTest {
         assertEquals(18.0, bodyText.getLineSpacing());
         assertEquals(0.0, bodyText.getSpaceBeforePoints());
         assertEquals(0.0, bodyText.getSpaceAfterPoints());
+    }
+
+    @Test
+    void tableHeaderAndBodyHaveIndependentTextStyles() {
+        StyleRegistry registry = DefaultStyles.createRegistry();
+
+        TableStyle first = registry.getTableStyle("TableHeader");
+        TableStyle second = registry.getTableStyle("TableHeader");
+
+        assertEquals("宋体", first.getHeaderTextStyle().getFontFamily());
+        assertEquals("宋体", first.getBodyTextStyle().getFontFamily());
+        assertEquals("Times New Roman", first.getHeaderTextStyle().getAsciiFontFamily());
+        assertEquals("黑体", first.getHeaderTextStyle().getFarEastFontFamily());
+        assertEquals("Times New Roman", first.getBodyTextStyle().getAsciiFontFamily());
+        assertEquals("宋体", first.getBodyTextStyle().getFarEastFontFamily());
+        assertEquals("#000000", first.getHeaderTextStyle().getColor());
+        assertEquals("#000000", first.getBodyTextStyle().getColor());
+        assertFalse(first.getHeaderTextStyle().isBold());
+        assertFalse(first.getBodyTextStyle().isBold());
+        assertTrue(first.isRepeatHeaderRow());
+
+        first.getHeaderTextStyle().setFontFamily("黑体");
+        assertEquals("宋体", second.getHeaderTextStyle().getFontFamily());
     }
 }

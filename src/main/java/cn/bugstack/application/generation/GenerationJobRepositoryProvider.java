@@ -3,6 +3,10 @@ package cn.bugstack.application.generation;
 import cn.bugstack.application.generation.webhook.WebhookDeliveryRepository;
 
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
 
 /** 按租户提供任务仓储，并暴露生产依赖的就绪状态。 */
 public interface GenerationJobRepositoryProvider extends AutoCloseable {
@@ -29,6 +33,32 @@ public interface GenerationJobRepositoryProvider extends AutoCloseable {
      * @return Webhook 投递仓储
      */
     WebhookDeliveryRepository webhookRepository(Path fileFallbackRoot);
+
+    /**
+     * 返回启动时需要恢复 Worker 的租户。
+     *
+     * @param now 当前时刻
+     * @return 存在排队、运行或待补偿终态事件任务的租户 ID
+     */
+    default Set<String> recoverableTenantIds(Instant now) {
+        return Collections.emptySet();
+    }
+
+    /** @return 所有租户的任务状态聚合；不支持时返回空映射 */
+    default Map<GenerationJobStatus, Long> countsByStatus() {
+        return Collections.emptyMap();
+    }
+
+    /**
+     * 跨租户分批清理终态任务。
+     *
+     * @param cutoff 截止时间
+     * @param limit 单批最大删除数
+     * @return 删除数量
+     */
+    default int purgeTerminalBefore(Instant cutoff, int limit) {
+        return 0;
+    }
 
     /** 释放连接池等共享资源。 */
     @Override

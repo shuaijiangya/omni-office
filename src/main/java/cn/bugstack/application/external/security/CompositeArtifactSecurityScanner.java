@@ -3,6 +3,7 @@ package cn.bugstack.application.external.security;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.nio.file.Path;
 
 /** 顺序执行全部产物扫描器。 */
 public final class CompositeArtifactSecurityScanner implements ArtifactSecurityScanner {
@@ -19,5 +20,11 @@ public final class CompositeArtifactSecurityScanner implements ArtifactSecurityS
     @Override
     public void scan(byte[] content, String fileName, String mediaType) {
         scanners.forEach(scanner -> scanner.scan(content, fileName, mediaType));
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void scan(Path contentPath, String fileName, String mediaType) {
+        scanners.forEach(scanner -> scanner.scan(contentPath, fileName, mediaType));
     }
 }

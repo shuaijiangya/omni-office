@@ -207,6 +207,53 @@ public final class PostgresWebhookDeliveryRepository implements WebhookDeliveryR
         }
     }
 
+    @Override
+    public WebhookDeliveryRecord redrive(String tenantId, String eventId, Instant now,
+                                         int additionalAttempts) {
+        if (tenantId == null || !tenantId.matches("[A-Za-z0-9._-]{1,64}") || eventId == null
+                || now == null || additionalAttempts < 1 || additionalAttempts > 20) {
+            throw new IllegalArgumentException("webhook redrive request is invalid");
+        }
+        String sql = "UPDATE omni_webhook_delivery SET status='RETRYING',"
+                + " max_attempts=LEAST(20, attempt_count + ?), response_status=NULL, last_error=NULL,"
+                + " next_attempt_at=?, delivered_at=NULL, lease_owner=NULL, lease_until=NULL,"
+                + " updated_at=?, version=version+1"
+                + " WHERE tenant_id=? AND event_id=?::uuid AND status='DEAD'"
+                + " AND attempt_count<20 RETURNING *";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, additionalAttempts);
+            statement.setTimestamp(2, timestamp(now));
+            statement.setTimestamp(3, timestamp(now));
+            statement.setString(4, tenantId);
+            statement.setString(5, eventId);
+            try (ResultSet result = statement.executeQuery()) {
+                if (result.next()) return read(result);
+                throw new IllegalStateException("webhook event is not DEAD or does not exist");
+            }
+        } catch (SQLException e) {
+            throw failure("redrive webhook delivery", e);
+        }
+    }
+
+    @Override
+    public int purgeTerminalBefore(Instant cutoff, int limit) {
+        if (cutoff == null || limit < 1 || limit > 10_000) {
+            throw new IllegalArgumentException("webhook purge boundary is invalid");
+        }
+        String sql = "DELETE FROM omni_webhook_delivery WHERE event_id IN ("
+                + "SELECT event_id FROM omni_webhook_delivery WHERE status IN ('DELIVERED','DEAD')"
+                + " AND updated_at <= ? ORDER BY updated_at LIMIT ?)";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setTimestamp(1, timestamp(cutoff));
+            statement.setInt(2, limit);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw failure("purge webhook deliveries", e);
+        }
+    }
+
     private WebhookDeliveryRecord update(WebhookDeliveryRecord record, String workerId,
                                          Instant now, boolean claimed) {
         validate(record);

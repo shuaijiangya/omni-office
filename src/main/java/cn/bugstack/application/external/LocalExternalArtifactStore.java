@@ -42,7 +42,7 @@ public final class LocalExternalArtifactStore implements ExternalArtifactStore {
     private final Clock clock;
 
     public LocalExternalArtifactStore(Path root) {
-        this(root, Duration.ofHours(24), new BasicArtifactSecurityScanner(), Clock.systemUTC());
+        this(root, Duration.ofDays(30), new BasicArtifactSecurityScanner(), Clock.systemUTC());
     }
 
     public LocalExternalArtifactStore(Path root, Duration retention, ArtifactSecurityScanner scanner) {
@@ -69,9 +69,16 @@ public final class LocalExternalArtifactStore implements ExternalArtifactStore {
 
     @Override
     public ExternalArtifactReference store(byte[] content, String fileName, String mediaType) {
+        return storeForPrincipal(content, fileName, mediaType, "system");
+    }
+
+    @Override
+    public ExternalArtifactReference storeForPrincipal(byte[] content, String fileName, String mediaType,
+                                                       String ownerPrincipalId) {
         if (content == null || content.length == 0 || content.length > MAX_ARTIFACT_BYTES) {
             throw new IllegalArgumentException("external artifact content must contain 1 to 104857600 bytes");
         }
+        String owner = requireOwnerPrincipalId(ownerPrincipalId);
         String safeFileName = requireFileName(fileName);
         String safeMediaType = requireMediaType(mediaType);
         scanner.scan(content, safeFileName, safeMediaType);
@@ -87,6 +94,7 @@ public final class LocalExternalArtifactStore implements ExternalArtifactStore {
             metadata.setProperty("mediaType", safeMediaType);
             metadata.setProperty("size", String.valueOf(content.length));
             metadata.setProperty("sha256", sha256);
+            metadata.setProperty("ownerPrincipalId", owner);
             Instant createdAt = clock.instant();
             metadata.setProperty("createdAt", createdAt.toString());
             metadata.setProperty("expiresAt", createdAt.plus(retention).toString());
@@ -98,6 +106,53 @@ public final class LocalExternalArtifactStore implements ExternalArtifactStore {
         } catch (IOException e) {
             deleteTreeQuietly(temporary);
             throw new IllegalStateException("failed to store external artifact", e);
+        }
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public ExternalArtifactReference storeForPrincipal(Path contentPath, String fileName, String mediaType,
+                                                       String ownerPrincipalId) {
+        if (contentPath == null || !Files.isRegularFile(contentPath)) {
+            throw new IllegalArgumentException("external artifact file is invalid");
+        }
+        final long size;
+        try {
+            size = Files.size(contentPath);
+        } catch (IOException e) {
+            throw new IllegalStateException("failed to inspect external artifact file", e);
+        }
+        if (size < 1 || size > MAX_ARTIFACT_BYTES) {
+            throw new IllegalArgumentException("external artifact file size is invalid");
+        }
+        String owner = requireOwnerPrincipalId(ownerPrincipalId);
+        String safeFileName = requireFileName(fileName);
+        String safeMediaType = requireMediaType(mediaType);
+        scanner.scan(contentPath, safeFileName, safeMediaType);
+        String id = UUID.randomUUID().toString();
+        Path temporary = root.resolve("." + id + ".tmp");
+        Path completed = root.resolve(id);
+        try {
+            Files.createDirectory(temporary);
+            Files.copy(contentPath, temporary.resolve(CONTENT_FILE));
+            Properties metadata = new Properties();
+            metadata.setProperty("fileName", safeFileName);
+            metadata.setProperty("mediaType", safeMediaType);
+            metadata.setProperty("size", String.valueOf(size));
+            metadata.setProperty("sha256", sha256(contentPath));
+            metadata.setProperty("ownerPrincipalId", owner);
+            Instant createdAt = clock.instant();
+            metadata.setProperty("createdAt", createdAt.toString());
+            metadata.setProperty("expiresAt", createdAt.plus(retention).toString());
+            try (OutputStream output = Files.newOutputStream(temporary.resolve(METADATA_FILE))) {
+                metadata.store(output, "omni-office external artifact");
+            }
+            moveCompleted(temporary, completed);
+            return reference(id, metadata);
+        } catch (IOException | RuntimeException e) {
+            deleteTreeQuietly(temporary);
+            if (e instanceof RuntimeException) throw (RuntimeException) e;
+            throw new IllegalStateException("failed to store external artifact file", e);
         }
     }
 
@@ -193,8 +248,10 @@ public final class LocalExternalArtifactStore implements ExternalArtifactStore {
         Instant createdAt = instant(metadata.getProperty("createdAt"), null);
         Instant expiresAt = instant(metadata.getProperty("expiresAt"),
                 createdAt == null ? null : createdAt.plus(retention));
+        String ownerPrincipalId = metadata.getProperty("ownerPrincipalId");
+        if (ownerPrincipalId != null) ownerPrincipalId = requireOwnerPrincipalId(ownerPrincipalId);
         return new ExternalArtifactReference(id, URI_PREFIX + id, fileName, mediaType, size, sha256,
-                createdAt, expiresAt);
+                createdAt, expiresAt, ownerPrincipalId);
     }
 
     private List<ExternalArtifactReference> listIncludingExpired() {
@@ -260,6 +317,13 @@ public final class LocalExternalArtifactStore implements ExternalArtifactStore {
         return value;
     }
 
+    private String requireOwnerPrincipalId(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9._-]{1,64}")) {
+            throw new IllegalArgumentException("external artifact owner principal id is invalid");
+        }
+        return value;
+    }
+
     private String sha256(byte[] content) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(content);
@@ -267,6 +331,20 @@ public final class LocalExternalArtifactStore implements ExternalArtifactStore {
             for (byte value : digest) {
                 hex.append(String.format("%02x", value & 0xff));
             }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
+    private String sha256(Path contentPath) throws IOException {
+        try (InputStream input = Files.newInputStream(contentPath)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) digest.update(buffer, 0, read);
+            StringBuilder hex = new StringBuilder(64);
+            for (byte value : digest.digest()) hex.append(String.format("%02x", value & 0xff));
             return hex.toString();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is not available", e);

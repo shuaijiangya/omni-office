@@ -15,6 +15,7 @@ public final class TemplateManagementApplication {
     private final FileDocumentTemplateCatalog catalog;
     private final DocumentTemplateSpecJsonCodec codec = new DocumentTemplateSpecJsonCodec();
     private final JsonSchemaCompatibilityChecker compatibility = new JsonSchemaCompatibilityChecker();
+    private final TemplatePublicationGate publicationGate;
 
     /**
      * 创建模板管理应用服务。
@@ -22,8 +23,15 @@ public final class TemplateManagementApplication {
      * @param catalog 模板治理目录
      */
     public TemplateManagementApplication(FileDocumentTemplateCatalog catalog) {
+        this(catalog, null);
+    }
+
+    /** 创建强制执行真实渲染发布门禁的模板管理服务。 */
+    public TemplateManagementApplication(FileDocumentTemplateCatalog catalog,
+                                         TemplatePublicationGate publicationGate) {
         if (catalog == null) throw new IllegalArgumentException("template catalog is required");
         this.catalog = catalog;
+        this.publicationGate = publicationGate;
     }
 
     /**
@@ -88,7 +96,19 @@ public final class TemplateManagementApplication {
      * @return 已发布版本
      */
     public TemplateRevision approve(String templateId, String version, String actor, String comment) {
+        if (publicationGate != null) {
+            throw new IllegalArgumentException("template publication requires sampleData");
+        }
         return catalog.approve(templateId, version, actor, comment);
+    }
+
+    /** 使用审核样例完成真实渲染门禁后发布模板。 */
+    public TemplateRevision approve(String templateId, String version, String actor,
+                                    String comment, JsonNode sampleData) {
+        if (publicationGate == null) return catalog.approve(templateId, version, actor, comment);
+        TemplateRevision candidate = catalog.getRevision(templateId, version);
+        TemplatePublicationEvidence evidence = publicationGate.validate(candidate.getTemplate(), sampleData);
+        return catalog.approve(templateId, version, actor, comment, evidence);
     }
 
     /**

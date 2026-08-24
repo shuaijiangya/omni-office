@@ -20,13 +20,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.EnumMap;
+import java.util.Map;
 
 /** PostgreSQL 生产仓储：依靠唯一索引、乐观版本和 SKIP LOCKED 提供跨实例语义。 */
 public final class PostgresGenerationJobRepository implements GenerationJobRepository {
 
     private static final String COLUMNS = "job_id, tenant_id, principal_id, correlation_id, "
             + "idempotency_key, request_sha256, mode, request_json, status, attempt_count, "
-            + "max_attempts, error_code, error_message, created_at, started_at, completed_at, "
+            + "max_attempts, error_code, error_message, current_stage, stage_started_at, deadline_at, draft_id, created_at, started_at, completed_at, "
             + "updated_at, version, lease_owner, lease_until, terminal_event_id, "
             + "terminal_event_queued_at, artifacts_json";
 
@@ -56,6 +58,9 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
     @Override
     public GenerationJobRecord create(GenerationJobRecord record, GenerationQuota quota,
                                       Instant dayStart) {
+        if (record != null && record.getCurrentStage() == null) {
+            record.setCurrentStage(GenerationStage.QUEUED);
+        }
         validate(record);
         if (quota == null || dayStart == null) {
             throw new IllegalArgumentException("generation quota admission is invalid");
@@ -64,7 +69,7 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
         GenerationJobRecord value = copy(record);
         value.setVersion(1L);
         String sql = "INSERT INTO omni_generation_job (" + COLUMNS + ") VALUES ("
-                + "?::uuid,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb)";
+                + "?::uuid,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?::uuid,?,?,?,?,?,?,?,?,?,?::jsonb)";
         try (Connection connection = dataSource.getConnection()) {
             boolean originalAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
@@ -230,12 +235,29 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
     @Override
     public List<GenerationJobRecord> list(GenerationJobStatus status, Instant beforeCreatedAt,
                                           String beforeJobId, int limit) {
+        return listInternal(null, status, beforeCreatedAt, beforeJobId, limit);
+    }
+
+    @Override
+    public List<GenerationJobRecord> listForPrincipal(String principalId, GenerationJobStatus status,
+                                                      Instant beforeCreatedAt, String beforeJobId,
+                                                      int limit) {
+        if (principalId == null || !principalId.matches("[A-Za-z0-9._-]{1,64}")) {
+            throw new IllegalArgumentException("generation principal id is invalid");
+        }
+        return listInternal(principalId, status, beforeCreatedAt, beforeJobId, limit);
+    }
+
+    private List<GenerationJobRecord> listInternal(String principalId, GenerationJobStatus status,
+                                                   Instant beforeCreatedAt, String beforeJobId,
+                                                   int limit) {
         if (limit < 1) throw new IllegalArgumentException("generation job list limit must be positive");
         if ((beforeCreatedAt == null) != (beforeJobId == null)) {
             throw new IllegalArgumentException("generation job cursor is incomplete");
         }
         String sql = "SELECT " + COLUMNS + " FROM omni_generation_job"
                 + " WHERE tenant_id = ?"
+                + (principalId == null ? "" : " AND principal_id = ?")
                 + (status == null ? "" : " AND status = ?")
                 + (beforeCreatedAt == null ? "" : " AND (created_at, job_id) < (?, ?::uuid)")
                 + " ORDER BY created_at DESC, job_id DESC LIMIT ?";
@@ -243,6 +265,7 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
              PreparedStatement statement = connection.prepareStatement(sql)) {
             int index = 1;
             statement.setString(index++, tenantId);
+            if (principalId != null) statement.setString(index++, principalId);
             if (status != null) statement.setString(index++, status.name());
             if (beforeCreatedAt != null) {
                 statement.setTimestamp(index++, timestamp(beforeCreatedAt));
@@ -256,6 +279,47 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
             }
         } catch (SQLException e) {
             throw databaseFailure("list generation jobs", e);
+        }
+    }
+
+    @Override
+    public Map<GenerationJobStatus, Long> countsByStatus() {
+        Map<GenerationJobStatus, Long> values = new EnumMap<>(GenerationJobStatus.class);
+        for (GenerationJobStatus status : GenerationJobStatus.values()) values.put(status, 0L);
+        String sql = "SELECT status, count(*) AS count FROM omni_generation_job"
+                + " WHERE tenant_id = ? GROUP BY status";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    values.put(GenerationJobStatus.valueOf(result.getString("status")),
+                            result.getLong("count"));
+                }
+            }
+            return values;
+        } catch (SQLException e) {
+            throw databaseFailure("count generation jobs", e);
+        }
+    }
+
+    @Override
+    public int purgeTerminalBefore(Instant cutoff, int limit) {
+        if (cutoff == null || limit < 1 || limit > 10_000) {
+            throw new IllegalArgumentException("generation purge boundary is invalid");
+        }
+        String sql = "DELETE FROM omni_generation_job WHERE job_id IN ("
+                + "SELECT job_id FROM omni_generation_job WHERE tenant_id = ?"
+                + " AND status IN ('SUCCEEDED','FAILED','CANCELLED') AND updated_at <= ?"
+                + " ORDER BY updated_at LIMIT ?)";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setTimestamp(2, timestamp(cutoff));
+            statement.setInt(3, limit);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw databaseFailure("purge generation jobs", e);
         }
     }
 
@@ -344,8 +408,8 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
         }
         String sql = "UPDATE omni_generation_job SET principal_id=?, correlation_id=?,"
                 + " idempotency_key=?, request_sha256=?, mode=?, request_json=?::jsonb, status=?,"
-                + " attempt_count=?, max_attempts=?, error_code=?, error_message=?, created_at=?,"
-                + " started_at=?, completed_at=?, updated_at=?, version=version+1, lease_owner=?,"
+                + " attempt_count=?, max_attempts=?, error_code=?, error_message=?,"
+                + " current_stage=?, stage_started_at=?, deadline_at=?, draft_id=?::uuid, created_at=?, started_at=?, completed_at=?, updated_at=?, version=version+1, lease_owner=?,"
                 + " lease_until=?, terminal_event_id=?, terminal_event_queued_at=?, artifacts_json=?::jsonb"
                 + " WHERE tenant_id=? AND job_id=?::uuid AND version=?"
                 + (claimed ? " AND status='RUNNING' AND lease_owner=? AND lease_until>?" : "");
@@ -395,6 +459,10 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
         statement.setInt(index++, value.getMaxAttempts());
         nullableString(statement, index++, value.getErrorCode());
         nullableString(statement, index++, value.getErrorMessage());
+        statement.setString(index++, value.getCurrentStage().name());
+        nullableTimestamp(statement, index++, value.getStageStartedAt());
+        nullableTimestamp(statement, index++, value.getDeadlineAt());
+        nullableString(statement, index++, value.getDraftId());
         statement.setTimestamp(index++, timestamp(value.getCreatedAt()));
         nullableTimestamp(statement, index++, value.getStartedAt());
         nullableTimestamp(statement, index++, value.getCompletedAt());
@@ -422,6 +490,10 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
         statement.setInt(index++, value.getMaxAttempts());
         nullableString(statement, index++, value.getErrorCode());
         nullableString(statement, index++, value.getErrorMessage());
+        statement.setString(index++, value.getCurrentStage().name());
+        nullableTimestamp(statement, index++, value.getStageStartedAt());
+        nullableTimestamp(statement, index++, value.getDeadlineAt());
+        nullableString(statement, index++, value.getDraftId());
         statement.setTimestamp(index++, timestamp(value.getCreatedAt()));
         nullableTimestamp(statement, index++, value.getStartedAt());
         nullableTimestamp(statement, index++, value.getCompletedAt());
@@ -454,6 +526,10 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
         value.setMaxAttempts(result.getInt("max_attempts"));
         value.setErrorCode(result.getString("error_code"));
         value.setErrorMessage(result.getString("error_message"));
+        value.setCurrentStage(GenerationStage.valueOf(result.getString("current_stage")));
+        value.setStageStartedAt(instant(result, "stage_started_at"));
+        value.setDeadlineAt(instant(result, "deadline_at"));
+        value.setDraftId(result.getString("draft_id"));
         value.setCreatedAt(instant(result, "created_at"));
         value.setStartedAt(instant(result, "started_at"));
         value.setCompletedAt(instant(result, "completed_at"));
@@ -470,7 +546,8 @@ public final class PostgresGenerationJobRepository implements GenerationJobRepos
         if (value == null || value.getJobId() == null || value.getTenantId() == null
                 || value.getPrincipalId() == null || value.getCorrelationId() == null
                 || value.getRequestSha256() == null || value.getMode() == null || value.getRequest() == null
-                || value.getStatus() == null || value.getCreatedAt() == null || value.getUpdatedAt() == null) {
+                || value.getStatus() == null || value.getCurrentStage() == null
+                || value.getCreatedAt() == null || value.getUpdatedAt() == null) {
             throw new IllegalArgumentException("generation job record is incomplete");
         }
     }

@@ -16,8 +16,8 @@ public class TableCellNode implements DocxNode {
     private int columnSpan = 1;
     /** 单元格纵向合并状态。 */
     private TableVerticalMerge verticalMerge = TableVerticalMerge.NONE;
-    /** 单元格内容的垂直对齐方式。 */
-    private TableCellVerticalAlignment verticalAlignment = TableCellVerticalAlignment.TOP;
+    /** 单元格内容的垂直对齐方式，默认居中。 */
+    private TableCellVerticalAlignment verticalAlignment = TableCellVerticalAlignment.CENTER;
 
     /**
      * 创建空的表格单元格节点。

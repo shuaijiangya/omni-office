@@ -79,6 +79,13 @@ public final class FileDocumentTemplateCatalog implements DocumentTemplateCatalo
 
     public synchronized TemplateRevision approve(String templateId, String version,
                                                   String reviewer, String comment) {
+        return approve(templateId, version, reviewer, comment, null);
+    }
+
+    /** 发布已通过真实渲染门禁的模板，并持久化验证证据。 */
+    public synchronized TemplateRevision approve(String templateId, String version,
+                                                  String reviewer, String comment,
+                                                  TemplatePublicationEvidence evidence) {
         TemplateRevision value = requireInReview(templateId, version);
         String actor = requireActor(reviewer);
         if (actor.equals(value.getCreatedBy())) {
@@ -88,6 +95,12 @@ public final class FileDocumentTemplateCatalog implements DocumentTemplateCatalo
         value.setStatus(TemplateLifecycleStatus.PUBLISHED);
         value.setReviewedBy(actor);
         value.setReviewComment(boundedComment(comment));
+        if (evidence != null) {
+            value.setSampleDataSha256(evidence.getSampleDataSha256());
+            value.setRenderedSha256(evidence.getRenderedSha256());
+            value.setRenderedSize(evidence.getRenderedSize());
+            value.setPublicationValidatedAt(evidence.getValidatedAt());
+        }
         value.setUpdatedAt(clock.instant());
         write(value, path(templateId, version), false);
         return copy(value);

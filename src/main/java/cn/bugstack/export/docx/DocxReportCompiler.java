@@ -5,6 +5,7 @@ import cn.bugstack.export.core.ReportDocumentRenderer;
 import cn.bugstack.export.definition.ReportBlueprint;
 import cn.bugstack.export.definition.ReportLayout;
 import cn.bugstack.export.document.CaptionTargetType;
+import cn.bugstack.export.document.CaptionPosition;
 import cn.bugstack.export.document.ReportCaption;
 import cn.bugstack.export.document.ReportClassDesignTable;
 import cn.bugstack.export.document.ReportDocument;
@@ -18,8 +19,14 @@ import cn.bugstack.export.document.ReportPageBreak;
 import cn.bugstack.export.document.ReportParagraph;
 import cn.bugstack.export.document.ReportSection;
 import cn.bugstack.export.document.ReportTable;
+import cn.bugstack.export.document.ReportTableMerge;
+import cn.bugstack.export.document.ReportTextRange;
+import cn.bugstack.export.document.ReportTextRangeStyle;
 import cn.bugstack.office.docx.api.DocxDocument;
 import cn.bugstack.office.docx.builder.SectionBuilder;
+import cn.bugstack.office.docx.model.TableHorizontalAlignment;
+import cn.bugstack.office.docx.model.TableVerticalMerge;
+import cn.bugstack.office.docx.style.RunStyle;
 import cn.bugstack.office.docx.render.AsposeWordsLicenseLoader;
 import com.aspose.words.Document;
 import com.aspose.words.SaveFormat;
@@ -191,10 +198,13 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
         // 应用样式以及设置封面
         applyLayout(document, blueprint, report);
         SectionBuilder section = document.section();
-        if (blueprint.getLayout().isBodyTitleEnabled()) {
+        boolean tableOfContentsEnabled = blueprint.getLayout().getTableOfContentsDepth() != null;
+        if (!tableOfContentsEnabled && blueprint.getLayout().isBodyTitleEnabled()) {
             section.title(report.getTitle());
         }
-        writeBasicInfo(section, report);
+        if (!tableOfContentsEnabled) {
+            writeBasicInfo(section, report);
+        }
         for (ReportSection reportSection : report.getSections()) {
             writeSection(section, reportSection, 1, blueprint);
         }
@@ -235,6 +245,12 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
     private void applyLayout(DocxDocument document, ReportBlueprint blueprint, ReportDocument report) {
         ReportLayout layout = blueprint.getLayout();
         document.metadata(report.getTitle(), blueprint.getAuthor(), blueprint.getSubject());
+        document.pageSetup(setup -> setup.paper(layout.getPaperSize())
+                .margins(layout.getTopMarginPoints(), layout.getRightMarginPoints(),
+                        layout.getBottomMarginPoints(), layout.getLeftMarginPoints()));
+        if (layout.getOrientation() == cn.bugstack.office.docx.model.DocxPageOrientation.LANDSCAPE) {
+            document.pageSetup(cn.bugstack.office.docx.builder.PageSetupBuilder::landscape);
+        }
         if (layout.isHeadingNumberingEnabled()) {
             document.enableHeadingNumbering();
         }
@@ -256,6 +272,14 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
         } else if (layout.getCoverTemplate() != null) {
             writeTemplateCover(document, layout.getCoverTemplate(), blueprint);
         }
+        if (!layout.getRevisions().isEmpty()) {
+            document.revisionHistory(history -> layout.getRevisions().forEach(item -> history.revision(
+                    item.getVersion(), item.getDate(), item.getDescription(), item.getAuthor())));
+        }
+        if (!layout.getApprovals().isEmpty()) {
+            document.approvalPage(approval -> layout.getApprovals().forEach(item -> approval.approval(
+                    item.getRole(), item.getPerson(), item.getDate())));
+        }
     }
 
     /** 将动态封面模板编译到目录之前的独立封面 Section。 */
@@ -276,7 +300,10 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
     }
 
     /**
-     * 将报告基础信息写入两列表格。
+     * 将无目录报告的基础信息写入两列表格。
+     *
+     * <p>启用目录的正式报告不会调用此方法，保证框架不会在目录与模块正文之间插入前导内容。
+     * 需要在正式报告中展示的基础信息应由封面模板或显式业务模块承载。</p>
      *
      * @param section 目标章节
      * @param report 报告语义文档
@@ -376,7 +403,31 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
         if (hasText(paragraph.getStyleName())) {
             builder.style(paragraph.getStyleName());
         }
-        builder.text(paragraph.getText()).end();
+        if (paragraph.getTextRanges().isEmpty()) {
+            builder.text(paragraph.getText(), paragraph.getFontColor());
+        } else {
+            for (ReportTextRange range : paragraph.getTextRanges()) {
+                builder.text(range.getText(), toRunStyle(range.getStyle(), paragraph.getFontColor()));
+            }
+        }
+        builder.end();
+    }
+
+    /** 将 Report 文本范围样式转换为底层 run 样式。 */
+    private RunStyle toRunStyle(ReportTextRangeStyle source, String inheritedParagraphColor) {
+        if (source == null && !hasText(inheritedParagraphColor)) return null;
+        RunStyle target = new RunStyle();
+        if (hasText(inheritedParagraphColor)) target.setColor(inheritedParagraphColor);
+        if (source == null) return target;
+        target.setFontFamily(source.getFontFamily());
+        target.setAsciiFontFamily(source.getAsciiFontFamily());
+        target.setFarEastFontFamily(source.getFarEastFontFamily());
+        target.setFontSize(source.getFontSize());
+        if (hasText(source.getFontColor())) target.setColor(source.getFontColor());
+        if (source.getBold() != null) target.setBold(source.getBold());
+        if (source.getItalic() != null) target.setItalic(source.getItalic());
+        if (source.getUnderline() != null) target.setUnderline(source.getUnderline());
+        return target;
     }
 
     /**
@@ -395,7 +446,7 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
         if (hasText(item.getStyleName())) {
             builder.style(item.getStyleName());
         }
-        builder.text(item.getText()).end();
+        builder.text(item.getText(), item.getFontColor()).end();
     }
 
     /**
@@ -405,17 +456,70 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
      * @param reportTable 报告表格
      */
     private void writeTable(SectionBuilder target, ReportTable reportTable) {
+        writeCaption(target, reportTable.getCaption(), CaptionPosition.ABOVE);
         cn.bugstack.office.docx.builder.TableBuilder<SectionBuilder> table = target.table()
-                .style(hasText(reportTable.getStyleName()) ? reportTable.getStyleName() : "TableHeader");
+                .style(hasText(reportTable.getStyleName()) ? reportTable.getStyleName() : "TableHeader")
+                .alignment(TableHorizontalAlignment.valueOf(reportTable.getAlignment().name()));
+        if (reportTable.getHeaderTextStyle() != null) {
+            table.headerTextStyle(toRunStyle(reportTable.getHeaderTextStyle(), null));
+        }
+        if (reportTable.getBodyTextStyle() != null) {
+            table.bodyTextStyle(toRunStyle(reportTable.getBodyTextStyle(), null));
+        }
         if (reportTable.getColumnWidths().length > 0) {
             table.widths(reportTable.getColumnWidths());
         }
-        table.headers(reportTable.getHeaders().toArray(new String[0]));
-        for (List<String> row : reportTable.getRows()) {
-            table.row(row.toArray(new String[0]));
+        List<List<String>> grid = new ArrayList<>();
+        grid.add(reportTable.getHeaders());
+        grid.addAll(reportTable.getRows());
+        for (int rowIndex = 0; rowIndex < grid.size(); rowIndex++) {
+            writeTableRow(table, grid.get(rowIndex), rowIndex, reportTable);
         }
         table.end();
-        writeCaption(target, reportTable.getCaption());
+        writeCaption(target, reportTable.getCaption(), CaptionPosition.BELOW);
+    }
+
+    /** 将逻辑表格行转换为带横向和纵向合并标记的 DOCX 单元格。 */
+    private void writeTableRow(cn.bugstack.office.docx.builder.TableBuilder<SectionBuilder> table,
+                               List<String> values, int rowIndex, ReportTable reportTable) {
+        table.row(row -> {
+            int columnIndex = 0;
+            while (columnIndex < values.size()) {
+                ReportTableMerge merge = findMerge(reportTable.getMerges(), rowIndex, columnIndex);
+                if (merge != null && columnIndex != merge.getStartColumn()) {
+                    columnIndex++;
+                    continue;
+                }
+                final int currentColumn = columnIndex;
+                final int columnSpan = merge == null ? 1 : merge.getColumnSpan();
+                final TableVerticalMerge verticalMerge = toVerticalMerge(merge, rowIndex);
+                final String text = merge != null && rowIndex > merge.getStartRow()
+                        ? "" : values.get(currentColumn);
+                row.cell(columnSpan, cell -> {
+                    cell.verticalMerge(verticalMerge);
+                    cell.paragraph().text(text, reportTable.getFontColor()).end();
+                });
+                columnIndex += columnSpan;
+            }
+        });
+    }
+
+    /** 查找覆盖指定逻辑单元格的合并区域。 */
+    private ReportTableMerge findMerge(List<ReportTableMerge> merges, int row, int column) {
+        for (ReportTableMerge merge : merges) {
+            if (merge.contains(row, column)) {
+                return merge;
+            }
+        }
+        return null;
+    }
+
+    /** 计算当前合并行需要写入的纵向合并标记。 */
+    private TableVerticalMerge toVerticalMerge(ReportTableMerge merge, int rowIndex) {
+        if (merge == null || merge.getRowSpan() == 1) {
+            return TableVerticalMerge.NONE;
+        }
+        return rowIndex == merge.getStartRow() ? TableVerticalMerge.FIRST : TableVerticalMerge.PREVIOUS;
     }
 
     /**
@@ -425,16 +529,18 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
      * @param image 报告图片
      */
     private void writeImage(SectionBuilder target, ReportImage image) {
+        writeCaption(target, image.getCaption(), CaptionPosition.ABOVE);
         if (image.getWidth() == null) {
             target.paragraph().image(image.getSource()).end();
         } else {
             target.paragraph().image(image.getSource(), image.getWidth(), image.getHeight()).end();
         }
-        writeCaption(target, image.getCaption());
+        writeCaption(target, image.getCaption(), CaptionPosition.BELOW);
     }
 
     /** 将图形写为普通预览图或内嵌可编辑 VSDX 的 OLE 对象。 */
     private void writeDiagram(SectionBuilder target, ReportDiagram diagram) {
+        writeCaption(target, diagram.getCaption(), CaptionPosition.ABOVE);
         if (diagram.getEmbedMode() == ReportDiagramEmbedMode.PREVIEW_IMAGE) {
             target.paragraph().image(diagram.getPreviewSource(), diagram.getMaxWidthPoints(),
                     diagram.getMaxHeightPoints()).end();
@@ -442,7 +548,7 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
             target.paragraph().editableVisio(diagram.getVsdxSource(), diagram.getPreviewSource(),
                     diagram.getMaxWidthPoints(), diagram.getMaxHeightPoints()).end();
         }
-        writeCaption(target, diagram.getCaption());
+        writeCaption(target, diagram.getCaption(), CaptionPosition.BELOW);
     }
 
     /**
@@ -468,8 +574,8 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
      * @param target DOCX 章节构建器
      * @param caption 报告题注
      */
-    private void writeCaption(SectionBuilder target, ReportCaption caption) {
-        if (caption == null || !hasText(caption.getText())) {
+    private void writeCaption(SectionBuilder target, ReportCaption caption, CaptionPosition position) {
+        if (caption == null || caption.getPosition() != position || !hasText(caption.getText())) {
             return;
         }
         if (!caption.isAutoNumbered()) {

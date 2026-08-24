@@ -16,9 +16,15 @@ import cn.bugstack.application.generation.GenerationJobRepositoryProvider;
 import cn.bugstack.application.generation.PostgresGenerationJobRepositoryProvider;
 import cn.bugstack.application.generation.GenerationQuotaPolicy;
 import cn.bugstack.application.generation.JsonGenerationQuotaPolicy;
+import cn.bugstack.application.ai.StructuredAiClient;
+import cn.bugstack.application.ai.ollama.OllamaStructuredAiClient;
+import cn.bugstack.application.ai.observability.JsonLinesAiTraceStore;
+import cn.bugstack.application.ai.observability.TracingStructuredAiClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
@@ -33,6 +39,10 @@ import java.util.concurrent.CountDownLatch;
 
 /** 可通过环境变量配置的独立 HTTP 服务入口。 */
 public final class McpHttpServerMain {
+
+    private static final Set<String> DEFAULT_API_KEY_SCOPES = Collections.unmodifiableSet(
+            new LinkedHashSet<>(Arrays.asList("mcp:invoke", "artifacts:read", "generation:create",
+                    "generation:read", "generation:cancel")));
 
     private McpHttpServerMain() {
     }
@@ -75,20 +85,28 @@ public final class McpHttpServerMain {
         if (apiKeys == null && bearer == null) {
             throw new IllegalStateException("configure API Key, HS256 JWT and/or OIDC/JWKS authentication");
         }
+        Duration jobRetention = Duration.ofDays(integer(env, "OMNI_OFFICE_GENERATION_JOB_RETENTION_DAYS", 30));
+        Duration webhookRetention = Duration.ofDays(integer(env, "OMNI_OFFICE_WEBHOOK_RETENTION_DAYS", 30));
+        Duration artifactRetention = Duration.ofHours(integer(env, "OMNI_OFFICE_ARTIFACT_RETENTION_HOURS", 720));
+        if (artifactRetention.compareTo(jobRetention) < 0) {
+            throw new IllegalArgumentException("artifact retention must not be shorter than generation job retention");
+        }
         GenerationJobRepositoryProvider jobRepositories = generationRepositories(env, dataRoot);
         ExternalArtifactStoreProvider artifactStores;
         try {
-            artifactStores = artifactStores(env);
+            artifactStores = artifactStores(env, artifactRetention);
         } catch (RuntimeException e) {
             jobRepositories.close();
             throw e;
         }
         McpHttpServer server;
         GenerationQuotaPolicy quotaPolicy = quotaPolicy(env);
+        StructuredAiClient aiClient = internalAiClient(env, dataRoot);
         try {
             server = new McpHttpServer(config, new CompositeHttpAuthenticator(apiKeys, bearer),
                     new JsonLinesAuditLog(dataRoot.resolve("audit/events.jsonl")),
-                    jobRepositories, artifactStores, quotaPolicy);
+                    jobRepositories, artifactStores, quotaPolicy,
+                    jobRetention, webhookRetention, aiClient);
         } catch (RuntimeException e) {
             jobRepositories.close();
             artifactStores.close();
@@ -100,20 +118,37 @@ public final class McpHttpServerMain {
         new CountDownLatch(1).await();
     }
 
-    private static HttpAuthenticator apiKeyAuthenticator(String configuration) {
+    static HttpAuthenticator apiKeyAuthenticator(String configuration) {
         if (configuration == null || configuration.isBlank()) {
             return null;
         }
         Map<String, RequestIdentity> keys = new LinkedHashMap<>();
         for (String entry : configuration.split(",")) {
             String[] sides = entry.trim().split("=", 2);
-            String[] identity = sides.length == 2 ? sides[1].split(":", 2) : new String[0];
-            if (identity.length != 2) {
-                throw new IllegalArgumentException("OMNI_OFFICE_API_KEYS uses key=tenant:principal entries");
+            String[] identity = sides.length == 2 ? sides[1].split(":", 3) : new String[0];
+            if (identity.length < 2 || sides[0].isBlank()) {
+                throw new IllegalArgumentException(
+                        "OMNI_OFFICE_API_KEYS uses key=tenant:principal[:scope1|scope2] entries");
             }
-            keys.put(sides[0], new RequestIdentity(identity[0], identity[1], Collections.singleton("*")));
+            Set<String> scopes = identity.length == 2 ? DEFAULT_API_KEY_SCOPES : scopes(identity[2]);
+            keys.put(sides[0], new RequestIdentity(identity[0], identity[1], scopes));
         }
         return new StaticApiKeyAuthenticator(keys);
+    }
+
+    private static Set<String> scopes(String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("API key scopes must not be blank");
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (String scope : value.split("\\|")) {
+            String normalized = scope.trim();
+            if (!normalized.matches("(?:\\*|[A-Za-z0-9._-]+:[A-Za-z0-9._-]+)")) {
+                throw new IllegalArgumentException("API key scope is invalid: " + normalized);
+            }
+            result.add(normalized);
+        }
+        return Collections.unmodifiableSet(result);
     }
 
     private static Set<String> csv(String value) {
@@ -153,9 +188,9 @@ public final class McpHttpServerMain {
                 integer(env, "OMNI_OFFICE_DATABASE_POOL_SIZE", 10));
     }
 
-    private static ExternalArtifactStoreProvider artifactStores(Map<String, String> env) {
+    private static ExternalArtifactStoreProvider artifactStores(Map<String, String> env, Duration retention) {
         String bucket = env.get("OMNI_OFFICE_S3_BUCKET");
-        if (bucket == null || bucket.isBlank()) return new LocalExternalArtifactStoreProvider();
+        if (bucket == null || bucket.isBlank()) return new LocalExternalArtifactStoreProvider(retention);
         String region = env.getOrDefault("OMNI_OFFICE_S3_REGION", "us-east-1");
         String prefix = env.getOrDefault("OMNI_OFFICE_S3_PREFIX", "omni-office");
         URI endpoint = uri(env.get("OMNI_OFFICE_S3_ENDPOINT"));
@@ -164,7 +199,7 @@ public final class McpHttpServerMain {
         boolean pathStyle = Boolean.parseBoolean(env.getOrDefault("OMNI_OFFICE_S3_PATH_STYLE", "false"));
         return new S3ExternalArtifactStoreProvider(bucket.trim(), region.trim(), prefix, endpoint,
                 accessKey, secretKey, pathStyle,
-                Duration.ofHours(integer(env, "OMNI_OFFICE_ARTIFACT_RETENTION_HOURS", 24)));
+                retention);
     }
 
     private static String blankToNull(String value) {
@@ -179,5 +214,28 @@ public final class McpHttpServerMain {
             throw new IllegalArgumentException("generation quota config path must be absolute");
         }
         return new JsonGenerationQuotaPolicy(path.normalize());
+    }
+
+    private static StructuredAiClient internalAiClient(Map<String, String> env, Path dataRoot) {
+        String model = blankToNull(env.get("OMNI_OFFICE_OLLAMA_MODEL"));
+        if (model == null) return null;
+        String endpointValue = blankToNull(env.get("OMNI_OFFICE_OLLAMA_CHAT_ENDPOINT"));
+        StructuredAiClient client;
+        if (endpointValue == null) {
+            client = new OllamaStructuredAiClient(model);
+        } else {
+            client = new OllamaStructuredAiClient(URI.create(endpointValue), model,
+                    Duration.ofSeconds(integer(env, "OMNI_OFFICE_OLLAMA_TIMEOUT_SECONDS", 300)),
+                    decimal(env, "OMNI_OFFICE_OLLAMA_TEMPERATURE", 0.1D),
+                    HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
+                    new ObjectMapper());
+        }
+        return new TracingStructuredAiClient(client,
+                new JsonLinesAiTraceStore(dataRoot.resolve("ai/traces.jsonl")), "ollama", model);
+    }
+
+    private static double decimal(Map<String, String> env, String key, double defaultValue) {
+        String value = env.get(key);
+        return value == null || value.isBlank() ? defaultValue : Double.parseDouble(value);
     }
 }

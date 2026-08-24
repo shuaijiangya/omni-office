@@ -14,6 +14,9 @@ public class ReportCaption {
     /** 是否在渲染时自动生成编号。 */
     private boolean autoNumbered = true;
 
+    /** 题注相对目标的位置，默认在下方以兼容既有输出。 */
+    private CaptionPosition position = CaptionPosition.BELOW;
+
     /**
      * 创建空题注，供序列化框架使用。
      */
@@ -83,5 +86,23 @@ public class ReportCaption {
      */
     public void setAutoNumbered(boolean autoNumbered) {
         this.autoNumbered = autoNumbered;
+    }
+
+    /**
+     * 获取题注位置。
+     *
+     * @return 上方或下方
+     */
+    public CaptionPosition getPosition() {
+        return position;
+    }
+
+    /**
+     * 设置题注位置。
+     *
+     * @param position 上方或下方；为空时恢复为下方
+     */
+    public void setPosition(CaptionPosition position) {
+        this.position = position == null ? CaptionPosition.BELOW : position;
     }
 }

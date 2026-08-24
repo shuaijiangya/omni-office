@@ -23,6 +23,10 @@ public final class GenerationJobRecord {
     private GenerationMode mode;
     private JsonNode request;
     private GenerationJobStatus status;
+    private GenerationStage currentStage;
+    private Instant stageStartedAt;
+    private Instant deadlineAt;
+    private String draftId;
     private int attemptCount;
     private int maxAttempts = 2;
     private String errorCode;
@@ -56,6 +60,14 @@ public final class GenerationJobRecord {
     public void setRequest(JsonNode request) { this.request = request == null ? null : request.deepCopy(); }
     public GenerationJobStatus getStatus() { return status; }
     public void setStatus(GenerationJobStatus status) { this.status = status; }
+    public GenerationStage getCurrentStage() { return currentStage; }
+    public void setCurrentStage(GenerationStage currentStage) { this.currentStage = currentStage; }
+    public Instant getStageStartedAt() { return stageStartedAt; }
+    public void setStageStartedAt(Instant stageStartedAt) { this.stageStartedAt = stageStartedAt; }
+    public Instant getDeadlineAt() { return deadlineAt; }
+    public void setDeadlineAt(Instant deadlineAt) { this.deadlineAt = deadlineAt; }
+    public String getDraftId() { return draftId; }
+    public void setDraftId(String draftId) { this.draftId = draftId; }
     public int getAttemptCount() { return attemptCount; }
     public void setAttemptCount(int attemptCount) { this.attemptCount = attemptCount; }
     public int getMaxAttempts() { return maxAttempts; }

@@ -7,6 +7,9 @@ import cn.bugstack.protocol.document.block.DiagramBlockSpec;
 import cn.bugstack.protocol.document.block.ParagraphBlockSpec;
 import cn.bugstack.protocol.document.block.SubsectionBlockSpec;
 import cn.bugstack.protocol.document.block.TableBlockSpec;
+import cn.bugstack.protocol.document.block.TableMergeSpec;
+import cn.bugstack.protocol.document.block.TextRangeSpec;
+import cn.bugstack.protocol.document.block.TextRangeStyleSpec;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -78,6 +81,83 @@ class DocumentSpecValidatorTest {
         assertEquals("CAPABILITY_NOT_AVAILABLE", result.getViolations().stream()
                 .filter(v -> v.getPath().endsWith("/blocks/1"))
                 .findFirst().orElseThrow().getCode());
+    }
+
+    @Test
+    void acceptsRectangularMergeWithEmptyFollowerCells() {
+        DocumentSpec spec = validSpec();
+        TableBlockSpec table = new TableBlockSpec();
+        table.setHeaders(Arrays.asList("分组", "名称", "状态"));
+        table.setRows(Arrays.asList(
+                Arrays.asList("A", "服务一", "正常"),
+                Arrays.asList("", "服务二", "正常")));
+        table.setMerges(Collections.singletonList(new TableMergeSpec(1, 0, 2, 1)));
+        table.setAlignment("CENTER");
+        table.setFontColor("#1F4E79");
+        table.setCaptionPosition("ABOVE");
+        spec.getSections().get(0).addBlock(table);
+
+        DocumentSpecValidationResult result = new DocumentSpecValidator().validate(spec);
+
+        assertTrue(result.isValid(), () -> result.getViolations().toString());
+    }
+
+    @Test
+    void rejectsOverlappingMergesNonEmptyFollowersAndInvalidColor() {
+        DocumentSpec spec = validSpec();
+        TableBlockSpec table = new TableBlockSpec();
+        table.setHeaders(Arrays.asList("A", "B", "C"));
+        table.setRows(Collections.singletonList(Arrays.asList("one", "must be empty", "three")));
+        table.setMerges(Arrays.asList(
+                new TableMergeSpec(1, 0, 1, 2),
+                new TableMergeSpec(1, 1, 1, 2)));
+        table.setFontColor("red");
+        spec.getSections().get(0).addBlock(table);
+
+        DocumentSpecValidationResult result = new DocumentSpecValidator().validate(spec);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getViolations().stream().anyMatch(v -> "INVALID_FORMAT".equals(v.getCode())));
+        assertTrue(result.getViolations().stream().anyMatch(v -> "OVERLAPPING_MERGE".equals(v.getCode())));
+        assertTrue(result.getViolations().stream()
+                .anyMatch(v -> "MERGED_CELL_MUST_BE_EMPTY".equals(v.getCode())));
+    }
+
+    @Test
+    void acceptsMultipleIndependentlyStyledTextRanges() {
+        DocumentSpec spec = validSpec();
+        ParagraphBlockSpec paragraph = new ParagraphBlockSpec();
+        TextRangeSpec plain = new TextRangeSpec("普通文本");
+        TextRangeSpec emphasized = new TextRangeSpec("强调文本");
+        TextRangeStyleSpec style = new TextRangeStyleSpec();
+        style.setFontFamily("Arial");
+        style.setFontSize(14D);
+        style.setFontColor("#C00000");
+        style.setBold(true);
+        style.setItalic(false);
+        style.setUnderline(true);
+        emphasized.setStyle(style);
+        paragraph.setTextRanges(Arrays.asList(plain, emphasized));
+        spec.getSections().get(0).addBlock(paragraph);
+
+        DocumentSpecValidationResult result = new DocumentSpecValidator().validate(spec);
+
+        assertTrue(result.isValid(), () -> result.getViolations().toString());
+    }
+
+    @Test
+    void rejectsParagraphWhenTextAndTextRangesAreBothConfigured() {
+        DocumentSpec spec = validSpec();
+        ParagraphBlockSpec paragraph = new ParagraphBlockSpec("legacy text");
+        paragraph.setTextRanges(Collections.singletonList(new TextRangeSpec("range text")));
+        spec.getSections().get(0).addBlock(paragraph);
+
+        DocumentSpecValidationResult result = new DocumentSpecValidator().validate(spec);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getViolations().stream()
+                .anyMatch(v -> "ONE_OF_REQUIRED".equals(v.getCode())
+                        && v.getPath().endsWith("/blocks/1")));
     }
 
     private DocumentSpec validSpec() {

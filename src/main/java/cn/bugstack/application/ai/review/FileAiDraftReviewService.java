@@ -15,6 +15,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -30,18 +32,30 @@ public final class FileAiDraftReviewService {
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     private final DocumentSpecJsonCodec codec = new DocumentSpecJsonCodec();
     private final Clock clock;
+    private final Duration retention;
 
     public FileAiDraftReviewService(Path root, DynamicDocumentExporter exporter) {
-        this(root, exporter, Clock.systemUTC());
+        this(root, exporter, Duration.ofDays(30), Clock.systemUTC());
     }
 
     FileAiDraftReviewService(Path root, DynamicDocumentExporter exporter, Clock clock) {
-        if (root == null || exporter == null || clock == null) {
+        this(root, exporter, Duration.ofDays(30), clock);
+    }
+
+    /** 创建使用指定统一保留期的 AI 草稿审核库。 */
+    public FileAiDraftReviewService(Path root, DynamicDocumentExporter exporter, Duration retention) {
+        this(root, exporter, retention, Clock.systemUTC());
+    }
+
+    FileAiDraftReviewService(Path root, DynamicDocumentExporter exporter, Duration retention, Clock clock) {
+        if (root == null || exporter == null || retention == null || retention.isZero()
+                || retention.isNegative() || clock == null) {
             throw new IllegalArgumentException("AI draft review dependencies are required");
         }
         this.root = root.toAbsolutePath().normalize();
         this.exporter = exporter;
         this.clock = clock;
+        this.retention = retention;
         try {
             Files.createDirectories(this.root);
         } catch (IOException e) {
@@ -72,8 +86,12 @@ public final class FileAiDraftReviewService {
     }
 
     public synchronized AiDraftRecord approve(String draftId, String reviewer, String comment) {
-        AiDraftRecord record = pending(draftId);
         String actor = requireActor(reviewer);
+        AiDraftRecord record = read(draftId);
+        if (record.getStatus() == AiDraftStatus.APPROVED && actor.equals(record.getReviewedBy())) {
+            return copy(record);
+        }
+        requirePending(record);
         if (actor.equals(record.getRequestedBy())) {
             throw new IllegalArgumentException("draft creator cannot approve their own AI document");
         }
@@ -86,9 +104,14 @@ public final class FileAiDraftReviewService {
     }
 
     public synchronized AiDraftRecord reject(String draftId, String reviewer, String comment) {
-        AiDraftRecord record = pending(draftId);
+        String actor = requireActor(reviewer);
+        AiDraftRecord record = read(draftId);
+        if (record.getStatus() == AiDraftStatus.REJECTED && actor.equals(record.getReviewedBy())) {
+            return copy(record);
+        }
+        requirePending(record);
         record.setStatus(AiDraftStatus.REJECTED);
-        record.setReviewedBy(requireActor(reviewer));
+        record.setReviewedBy(actor);
         record.setReviewComment(comment(comment, true));
         record.setReviewedAt(clock.instant());
         write(record, false);
@@ -108,6 +131,11 @@ public final class FileAiDraftReviewService {
         return copy(read(draftId));
     }
 
+    /** 返回审核快照中的严格 DocumentSpec，用于审批后恢复确定性生成任务。 */
+    public synchronized DocumentSpec documentSpec(String draftId) {
+        return codec.read(read(draftId).getDocumentSpec().toString());
+    }
+
     public synchronized List<AiDraftRecord> list() {
         List<AiDraftRecord> result = new ArrayList<>();
         try (Stream<Path> paths = Files.list(root)) {
@@ -120,12 +148,33 @@ public final class FileAiDraftReviewService {
         return result;
     }
 
-    private AiDraftRecord pending(String draftId) {
-        AiDraftRecord record = read(draftId);
+    /** 删除超过保留期的审核草稿，包括长期无人处理的待审核草稿。 */
+    public synchronized int purgeExpired(Instant now) {
+        if (now == null) throw new IllegalArgumentException("AI draft purge time is required");
+        int purged = 0;
+        try (Stream<Path> paths = Files.list(root)) {
+            for (Path path : (Iterable<Path>) paths
+                    .filter(item -> item.getFileName().toString().endsWith(".json"))::iterator) {
+                try {
+                    AiDraftRecord record = readPath(path);
+                    Instant anchor = record.getReviewedAt() == null ? record.getCreatedAt() : record.getReviewedAt();
+                    if (anchor != null && !anchor.plus(retention).isAfter(now) && Files.deleteIfExists(path)) {
+                        purged++;
+                    }
+                } catch (IOException | RuntimeException ignored) {
+                    // Malformed records are retained for operator inspection.
+                }
+            }
+            return purged;
+        } catch (IOException e) {
+            throw new IllegalStateException("failed to purge AI drafts", e);
+        }
+    }
+
+    private void requirePending(AiDraftRecord record) {
         if (record.getStatus() != AiDraftStatus.PENDING_REVIEW) {
             throw new IllegalStateException("AI draft is already in a terminal review state");
         }
-        return record;
     }
 
     private AiDraftRecord read(String draftId) {

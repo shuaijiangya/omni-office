@@ -31,6 +31,18 @@ class DocumentSpecJsonCodecTest {
         assertTrue(complete.getSections().get(0).getBlocks().get(1) instanceof BulletListBlockSpec);
         assertTrue(complete.getSections().get(0).getBlocks().get(3) instanceof TableBlockSpec);
         assertTrue(complete.getSections().get(0).getBlocks().get(4) instanceof SubsectionBlockSpec);
+        TableBlockSpec table = (TableBlockSpec) complete.getSections().get(0).getBlocks().get(3);
+        assertEquals("CENTER", table.getAlignment());
+        assertEquals("ABOVE", table.getCaptionPosition());
+        assertEquals("Arial", table.getHeaderTextStyle().getAsciiFontFamily());
+        assertEquals("微软雅黑", table.getHeaderTextStyle().getFarEastFontFamily());
+        assertEquals("Calibri", table.getBodyTextStyle().getAsciiFontFamily());
+        assertEquals("仿宋", table.getBodyTextStyle().getFarEastFontFamily());
+        assertEquals(1, table.getMerges().size());
+        ParagraphBlockSpec richParagraph = (ParagraphBlockSpec) complete.getSections().get(0).getBlocks().get(0);
+        assertEquals(4, richParagraph.getTextRanges().size());
+        assertEquals(Boolean.TRUE, richParagraph.getTextRanges().get(0).getStyle().getBold());
+        assertEquals(Boolean.TRUE, richParagraph.getTextRanges().get(2).getStyle().getUnderline());
 
         DocumentSpec roundTrip = codec.read(codec.write(complete));
         assertEquals(complete.getMetadata().getTitle(), roundTrip.getMetadata().getTitle());

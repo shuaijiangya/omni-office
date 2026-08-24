@@ -3,15 +3,30 @@ package cn.bugstack.application.external;
 import cn.bugstack.application.artifact.DiagramArtifactReference;
 import cn.bugstack.application.artifact.LocalDiagramArtifactStore;
 import cn.bugstack.application.artifact.ResolvedDiagramArtifact;
+import cn.bugstack.application.ai.DefaultInternalAiDocumentService;
+import cn.bugstack.application.ai.InternalAiDocumentService;
+import cn.bugstack.application.ai.StructuredAiClient;
+import cn.bugstack.application.ai.AiDocumentResult;
+import cn.bugstack.application.ai.review.AiDraftRecord;
+import cn.bugstack.application.ai.review.FileAiDraftReviewService;
 import cn.bugstack.application.document.DocumentGenerationApplication;
+import cn.bugstack.application.document.DocumentSpecLimits;
+import cn.bugstack.application.document.DocumentSpecValidator;
+import cn.bugstack.application.document.DocumentCostEstimate;
+import cn.bugstack.application.document.DocumentCostEstimator;
 import cn.bugstack.application.template.DocumentTemplateApplication;
 import cn.bugstack.application.template.DocumentTemplateCatalog;
 import cn.bugstack.application.template.DocumentTemplateDescriptor;
+import cn.bugstack.application.template.governance.TemplatePublicationGate;
 import cn.bugstack.export.api.ReportOutputFormat;
 import cn.bugstack.protocol.diagram.DiagramSpec;
 import cn.bugstack.protocol.diagram.DiagramSpecJsonCodec;
 import cn.bugstack.protocol.document.DocumentSpec;
 import cn.bugstack.protocol.document.DocumentSpecJsonCodec;
+import cn.bugstack.protocol.document.SectionSpec;
+import cn.bugstack.protocol.document.block.BlockSpec;
+import cn.bugstack.protocol.document.block.ImageBlockSpec;
+import cn.bugstack.protocol.document.block.SubsectionBlockSpec;
 import cn.bugstack.protocol.template.DocumentTemplateSpec;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,7 +43,9 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Base64;
 import java.time.Instant;
+import java.time.Duration;
 
 /**
  * M5 共享外部工具门面。
@@ -44,6 +61,9 @@ public final class ExternalDocumentToolApplication {
     public static final String EXPORT_TEMPLATE = "omni_template_export";
     public static final String EXPORT_DOCUMENT = "omni_document_export";
     public static final String GENERATE_DIAGRAM = "omni_diagram_generate";
+    public static final String STORE_ASSET = "omni_asset_store";
+    public static final String GET_ASSET = "omni_asset_get";
+    public static final String DELETE_ASSET = "omni_asset_delete";
 
     private final ObjectMapper mapper;
     private final DocumentSpecJsonCodec documentCodec;
@@ -52,8 +72,10 @@ public final class ExternalDocumentToolApplication {
     private final DocumentGenerationApplication documents;
     private final DocumentTemplateApplication templates;
     private final ExternalArtifactStore outputStore;
+    private final FileAiDraftReviewService aiReviews;
     private final Map<String, ExternalToolDefinition> definitions;
     private final ExternalDocumentSpecSafetyValidator externalSafety = new ExternalDocumentSpecSafetyValidator();
+    private final DocumentCostEstimator costEstimator = new DocumentCostEstimator();
 
     public ExternalDocumentToolApplication(Path artifactRoot) {
         this(artifactRoot, new ObjectMapper());
@@ -65,7 +87,13 @@ public final class ExternalDocumentToolApplication {
 
     public ExternalDocumentToolApplication(Path artifactRoot, DocumentTemplateCatalog templateCatalog,
                                            ExternalArtifactStore outputStore) {
-        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore);
+        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore, Duration.ofDays(30));
+    }
+
+    /** 创建输出工件和图中间工件使用相同保留策略的工具门面。 */
+    public ExternalDocumentToolApplication(Path artifactRoot, DocumentTemplateCatalog templateCatalog,
+                                           ExternalArtifactStore outputStore, Duration retention) {
+        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore, retention);
     }
 
     ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper) {
@@ -74,12 +102,13 @@ public final class ExternalDocumentToolApplication {
 
     private ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper,
                                             DocumentTemplateCatalog templateCatalog) {
-        this(artifactRoot, mapper, templateCatalog, null);
+        this(artifactRoot, mapper, templateCatalog, null, Duration.ofDays(30));
     }
 
     private ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper,
                                             DocumentTemplateCatalog templateCatalog,
-                                            ExternalArtifactStore configuredOutputStore) {
+                                            ExternalArtifactStore configuredOutputStore,
+                                            Duration retention) {
         if (artifactRoot == null || mapper == null) {
             throw new IllegalArgumentException("external document tool root and mapper are required");
         }
@@ -87,12 +116,18 @@ public final class ExternalDocumentToolApplication {
         this.documentCodec = new DocumentSpecJsonCodec(this.mapper);
         this.diagramCodec = new DiagramSpecJsonCodec(this.mapper);
         Path root = artifactRoot.toAbsolutePath().normalize();
-        this.diagramStore = new LocalDiagramArtifactStore(root.resolve("diagrams"));
+        if (retention == null || retention.isZero() || retention.isNegative()) {
+            throw new IllegalArgumentException("artifact retention must be positive");
+        }
+        this.diagramStore = new LocalDiagramArtifactStore(root.resolve("diagrams"), retention,
+                java.time.Clock.systemUTC());
         this.documents = new DocumentGenerationApplication(diagramStore);
+        this.aiReviews = new FileAiDraftReviewService(root.resolve("ai-drafts"), documents, retention);
         this.templates = templateCatalog == null ? new DocumentTemplateApplication(documents)
                 : new DocumentTemplateApplication(templateCatalog, documents);
         this.outputStore = configuredOutputStore == null
-                ? new LocalExternalArtifactStore(root.resolve("outputs")) : configuredOutputStore;
+                ? new LocalExternalArtifactStore(root.resolve("outputs"), retention,
+                new cn.bugstack.application.external.security.BasicArtifactSecurityScanner()) : configuredOutputStore;
         this.definitions = Collections.unmodifiableMap(createDefinitions());
     }
 
@@ -113,9 +148,22 @@ public final class ExternalDocumentToolApplication {
     }
 
     public ExternalToolResult call(String name, JsonNode arguments) {
+        return call(name, arguments, "system");
+    }
+
+    /**
+     * 使用调用主体上下文执行工具，使所有新工件持久化绑定到该主体。
+     *
+     * @param name 工具名称
+     * @param arguments 工具参数
+     * @param principalId 调用主体 ID
+     * @return 工具结果
+     */
+    public ExternalToolResult call(String name, JsonNode arguments, String principalId) {
         if (!definitions.containsKey(name)) {
             throw new UnknownExternalToolException(name);
         }
+        String owner = requirePrincipalId(principalId);
         JsonNode args = requireArguments(arguments);
         switch (name) {
             case LIST_TEMPLATES:
@@ -123,11 +171,17 @@ public final class ExternalDocumentToolApplication {
             case GET_TEMPLATE_SCHEMA:
                 return templateSchema(args);
             case EXPORT_TEMPLATE:
-                return exportTemplate(args);
+                return exportTemplate(args, owner);
             case EXPORT_DOCUMENT:
-                return exportDocument(args);
+                return exportDocument(args, owner);
             case GENERATE_DIAGRAM:
-                return generateDiagram(args);
+                return generateDiagram(args, owner);
+            case STORE_ASSET:
+                return storeAsset(args, owner);
+            case GET_ASSET:
+                return getAsset(args, owner);
+            case DELETE_ASSET:
+                return deleteAsset(args, owner);
             default:
                 throw new UnknownExternalToolException(name);
         }
@@ -137,8 +191,20 @@ public final class ExternalDocumentToolApplication {
         return outputStore.resolve(resourceUri);
     }
 
+    /**
+     * 按主体所有权读取工件。
+     *
+     * @param resourceUri 工件 URI
+     * @param principalId 当前主体 ID
+     * @param allowAny 是否具有租户内跨主体读取权限
+     * @return 已授权工件
+     */
+    public ResolvedExternalArtifact readResource(String resourceUri, String principalId, boolean allowAny) {
+        return outputStore.resolveForPrincipal(resourceUri, requirePrincipalId(principalId), allowAny);
+    }
+
     public int purgeExpiredArtifacts(Instant now) {
-        return outputStore.purgeExpired(now);
+        return outputStore.purgeExpired(now) + diagramStore.purgeExpired(now) + aiReviews.purgeExpired(now);
     }
 
     /** 供 REST 等协议适配器在提交任务前执行无副作用 DocumentSpec 校验。 */
@@ -151,6 +217,12 @@ public final class ExternalDocumentToolApplication {
         externalSafety.validateOrThrow(spec);
     }
 
+    /** 校验后返回文档规模和预估页数，供提交前容量提示使用。 */
+    public DocumentCostEstimate estimateDocument(JsonNode documentSpec) {
+        validateDocument(documentSpec);
+        return costEstimator.estimate(documentCodec.read(documentSpec.toString()));
+    }
+
     /** 校验模板数据、执行受限映射并校验映射后的 DocumentSpec，但不生成文件或图工件。 */
     public void validateTemplateData(String templateId, String version, JsonNode data) {
         if (templateId == null || templateId.isBlank() || version == null || version.isBlank()
@@ -158,6 +230,43 @@ public final class ExternalDocumentToolApplication {
             throw new IllegalArgumentException("template id, version and object data are required");
         }
         documents.validate(templates.renderSpec(templateId, version, data));
+    }
+
+    /**
+     * 创建复用当前租户模板目录和 DocumentSpec 导出器的内部 AI 服务。
+     *
+     * @param aiClient 结构化模型客户端
+     * @return 与外部工具共享模板和文档语义的内部 AI 服务
+     */
+    public InternalAiDocumentService createInternalAiService(StructuredAiClient aiClient) {
+        if (aiClient == null) throw new IllegalArgumentException("structured AI client is required");
+        return new DefaultInternalAiDocumentService(aiClient,
+                new DocumentSpecValidator(DocumentSpecLimits.defaults(), true), templates, documents);
+    }
+
+    /** 保存 AI 生成的结构化草稿，等待租户审核人处理。 */
+    public AiDraftRecord submitAiDraft(AiDocumentResult result, String requestedBy) {
+        return aiReviews.submit(result, requestedBy);
+    }
+
+    /** 审批 AI 草稿。 */
+    public AiDraftRecord approveAiDraft(String draftId, String reviewer, String comment) {
+        return aiReviews.approve(draftId, reviewer, comment);
+    }
+
+    /** 驳回 AI 草稿。 */
+    public AiDraftRecord rejectAiDraft(String draftId, String reviewer, String comment) {
+        return aiReviews.reject(draftId, reviewer, comment);
+    }
+
+    /** 获取草稿中的结构化文档快照。 */
+    public DocumentSpec aiDraftDocumentSpec(String draftId) {
+        return aiReviews.documentSpec(draftId);
+    }
+
+    /** 创建复用当前确定性文档链的模板发布门禁。 */
+    public TemplatePublicationGate createTemplatePublicationGate() {
+        return new TemplatePublicationGate(documents);
     }
 
     private ExternalToolResult listTemplates() {
@@ -184,13 +293,19 @@ public final class ExternalDocumentToolApplication {
         return ExternalToolResult.data(result);
     }
 
-    private ExternalToolResult exportTemplate(JsonNode arguments) {
+    private ExternalToolResult exportTemplate(JsonNode arguments, String principalId) {
         String templateId = requiredText(arguments, "templateId");
         String version = requiredText(arguments, "version");
         JsonNode data = requiredObject(arguments, "data");
         ReportOutputFormat format = outputFormat(arguments);
-        byte[] content = templates.exportToBytes(templateId, version, data, format);
-        ExternalArtifactReference artifact = storeDocument(content, format);
+        Path output = temporaryOutput(format);
+        ExternalArtifactReference artifact;
+        try {
+            templates.export(templateId, version, data, format, output);
+            artifact = storeDocument(output, format, principalId);
+        } finally {
+            deleteTemporary(output);
+        }
         ObjectNode result = mapper.createObjectNode();
         result.put("templateId", templateId);
         result.put("version", version);
@@ -198,28 +313,36 @@ public final class ExternalDocumentToolApplication {
         return ExternalToolResult.artifact(result, artifact);
     }
 
-    private ExternalToolResult exportDocument(JsonNode arguments) {
+    private ExternalToolResult exportDocument(JsonNode arguments, String principalId) {
         ObjectNode specJson = (ObjectNode) arguments.deepCopy();
         ReportOutputFormat format = outputFormat(specJson);
         specJson.remove("outputFormat");
         DocumentSpec spec = documentCodec.read(specJson.toString());
         externalSafety.validateOrThrow(spec);
-        byte[] content = documents.exportToBytes(spec, format);
-        ExternalArtifactReference artifact = storeDocument(content, format);
+        materializeAssets(spec, principalId);
+        Path output = temporaryOutput(format);
+        ExternalArtifactReference artifact;
+        try {
+            documents.export(spec, format, output);
+            artifact = storeDocument(output, format, principalId);
+        } finally {
+            deleteTemporary(output);
+        }
         ObjectNode result = mapper.createObjectNode();
         result.set("artifact", artifactNode(artifact));
         return ExternalToolResult.artifact(result, artifact);
     }
 
-    private ExternalToolResult generateDiagram(JsonNode arguments) {
+    private ExternalToolResult generateDiagram(JsonNode arguments, String principalId) {
         DiagramSpec spec = diagramCodec.read(arguments.toString());
         DiagramArtifactReference generated = documents.generateDiagram(spec);
         ResolvedDiagramArtifact resolved = diagramStore.resolve(generated.getDiagramArtifactId());
         try {
-            ExternalArtifactReference vsdx = outputStore.store(Files.readAllBytes(resolved.getVsdxPath()),
-                    "diagram.vsdx", "application/vnd.ms-visio.drawing");
-            ExternalArtifactReference preview = outputStore.store(Files.readAllBytes(resolved.getPreviewPath()),
-                    "preview.png", "image/png");
+            ExternalArtifactReference vsdx = outputStore.storeForPrincipal(
+                    Files.readAllBytes(resolved.getVsdxPath()), "diagram.vsdx",
+                    "application/vnd.ms-visio.drawing", principalId);
+            ExternalArtifactReference preview = outputStore.storeForPrincipal(
+                    Files.readAllBytes(resolved.getPreviewPath()), "preview.png", "image/png", principalId);
             ObjectNode result = mapper.createObjectNode();
             result.put("diagramArtifactId", generated.getDiagramArtifactId());
             result.set("vsdx", artifactNode(vsdx));
@@ -230,17 +353,138 @@ public final class ExternalDocumentToolApplication {
         }
     }
 
-    private ExternalArtifactReference storeDocument(byte[] content, ReportOutputFormat format) {
+    private ExternalToolResult storeAsset(JsonNode arguments, String principalId) {
+        String fileName = requiredText(arguments, "fileName");
+        String mediaType = requiredText(arguments, "mediaType");
+        if (!"image/png".equals(mediaType) && !"image/jpeg".equals(mediaType)) {
+            throw new IllegalArgumentException("managed assets currently support image/png and image/jpeg");
+        }
+        String lowerName = fileName.toLowerCase(java.util.Locale.ROOT);
+        if (("image/png".equals(mediaType) && !lowerName.endsWith(".png"))
+                || ("image/jpeg".equals(mediaType)
+                && !lowerName.endsWith(".jpg") && !lowerName.endsWith(".jpeg"))) {
+            throw new IllegalArgumentException("managed image file extension must match mediaType");
+        }
+        String encoded = requiredText(arguments, "contentBase64");
+        if (encoded.length() > 13_981_016) {
+            throw new IllegalArgumentException("managed image asset exceeds the Base64 input limit");
+        }
+        byte[] content;
+        try {
+            content = Base64.getDecoder().decode(encoded);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("asset contentBase64 is invalid", e);
+        }
+        if (content.length == 0 || content.length > 10 * 1024 * 1024) {
+            throw new IllegalArgumentException("managed image asset must contain 1 to 10485760 bytes");
+        }
+        ExternalArtifactReference asset = outputStore.storeForPrincipal(content, fileName, mediaType, principalId);
+        ObjectNode result = mapper.createObjectNode();
+        result.put("assetId", asset.getArtifactId());
+        result.set("artifact", artifactNode(asset));
+        return ExternalToolResult.artifact(result, asset);
+    }
+
+    private ExternalToolResult getAsset(JsonNode arguments, String principalId) {
+        ResolvedExternalArtifact resolved = resolveAsset(requiredText(arguments, "assetId"), principalId);
+        ObjectNode result = mapper.createObjectNode();
+        result.put("assetId", resolved.getReference().getArtifactId());
+        result.set("artifact", artifactNode(resolved.getReference()));
+        return ExternalToolResult.data(result);
+    }
+
+    private ExternalToolResult deleteAsset(JsonNode arguments, String principalId) {
+        ResolvedExternalArtifact resolved = resolveAsset(requiredText(arguments, "assetId"), principalId);
+        boolean deleted = outputStore.delete(resolved.getReference().getResourceUri());
+        ObjectNode result = mapper.createObjectNode();
+        result.put("assetId", resolved.getReference().getArtifactId());
+        result.put("deleted", deleted);
+        return ExternalToolResult.data(result);
+    }
+
+    private void materializeAssets(DocumentSpec spec, String principalId) {
+        if (spec == null || spec.getSections() == null) return;
+        for (SectionSpec section : spec.getSections()) materializeAssets(section, principalId);
+    }
+
+    private void materializeAssets(SectionSpec section, String principalId) {
+        if (section == null || section.getBlocks() == null) return;
+        for (BlockSpec block : section.getBlocks()) {
+            if (block instanceof ImageBlockSpec) {
+                ImageBlockSpec image = (ImageBlockSpec) block;
+                ResolvedExternalArtifact resolved = resolveAsset(image.getAssetId(), principalId);
+                if (!resolved.getReference().getMediaType().startsWith("image/")) {
+                    throw new IllegalArgumentException("managed asset is not an image");
+                }
+                image.setSource(resolved.getContentPath().toString());
+                image.setAssetId(null);
+            } else if (block instanceof SubsectionBlockSpec) {
+                SubsectionBlockSpec subsection = (SubsectionBlockSpec) block;
+                SectionSpec child = new SectionSpec(subsection.getTitle());
+                child.setBlocks(subsection.getBlocks());
+                materializeAssets(child, principalId);
+            }
+        }
+    }
+
+    private ResolvedExternalArtifact resolveAsset(String assetId, String principalId) {
+        final String id;
+        try {
+            id = java.util.UUID.fromString(assetId).toString();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("assetId must be a UUID", e);
+        }
+        ResolvedExternalArtifact resolved = outputStore.resolveForPrincipal(
+                "omni-office://artifacts/" + id, principalId, false);
+        if (!resolved.getReference().getMediaType().startsWith("image/")) {
+            throw new IllegalArgumentException("managed asset is not an image");
+        }
+        return resolved;
+    }
+
+    private ExternalArtifactReference storeDocument(byte[] content, ReportOutputFormat format,
+                                                    String principalId) {
         switch (format) {
             case DOCX:
-                return outputStore.store(content, "document.docx",
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+                return outputStore.storeForPrincipal(content, "document.docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", principalId);
             case PDF:
-                return outputStore.store(content, "document.pdf", "application/pdf");
+                return outputStore.storeForPrincipal(content, "document.pdf", "application/pdf", principalId);
             case HTML:
-                return outputStore.store(content, "document.html", "text/html");
+                return outputStore.storeForPrincipal(content, "document.html", "text/html", principalId);
             default:
                 throw new IllegalArgumentException("unsupported output format: " + format);
+        }
+    }
+
+    private ExternalArtifactReference storeDocument(Path contentPath, ReportOutputFormat format,
+                                                    String principalId) {
+        switch (format) {
+            case DOCX:
+                return outputStore.storeForPrincipal(contentPath, "document.docx",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document", principalId);
+            case PDF:
+                return outputStore.storeForPrincipal(contentPath, "document.pdf", "application/pdf", principalId);
+            case HTML:
+                return outputStore.storeForPrincipal(contentPath, "document.html", "text/html", principalId);
+            default:
+                throw new IllegalArgumentException("unsupported output format: " + format);
+        }
+    }
+
+    private Path temporaryOutput(ReportOutputFormat format) {
+        try {
+            return Files.createTempFile("omni-document-", "." + format.name().toLowerCase());
+        } catch (IOException e) {
+            throw new IllegalStateException("failed to create temporary document output", e);
+        }
+    }
+
+    private void deleteTemporary(Path output) {
+        try {
+            Files.deleteIfExists(output);
+        } catch (IOException ignored) {
+            // Lifecycle cleanup can remove a rare leftover after an operating-system file lock.
         }
     }
 
@@ -257,6 +501,13 @@ public final class ExternalDocumentToolApplication {
         }
         if (artifact.getExpiresAt() != null) {
             value.put("expiresAt", artifact.getExpiresAt().toString());
+        }
+        return value;
+    }
+
+    private String requirePrincipalId(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9._-]{1,64}")) {
+            throw new IllegalArgumentException("external tool principal id is invalid");
         }
         return value;
     }
@@ -282,6 +533,15 @@ public final class ExternalDocumentToolApplication {
                 "校验 DiagramSpec 1.0，生成可编辑 VSDX、PNG 预览以及可供 DocumentSpec 引用的工件标识。",
                 classPathJson("/diagram-spec/1.0/schema.json"), diagramOutputSchema(artifactSchema),
                 annotations(false, false)));
+        tools.put(STORE_ASSET, new ExternalToolDefinition(STORE_ASSET, "保存受控图片资产",
+                "保存 PNG/JPEG 图片并返回只能由同一主体在 DocumentSpec 中引用的 assetId。",
+                assetStoreInputSchema(), assetOutputSchema(artifactSchema), annotations(false, false)));
+        tools.put(GET_ASSET, new ExternalToolDefinition(GET_ASSET, "读取图片资产元数据",
+                "读取当前主体拥有的图片资产元数据。", assetKeyInputSchema(),
+                assetOutputSchema(artifactSchema), annotations(true, true)));
+        tools.put(DELETE_ASSET, new ExternalToolDefinition(DELETE_ASSET, "删除图片资产",
+                "删除当前主体拥有的图片资产。", assetKeyInputSchema(),
+                deleteAssetOutputSchema(), annotations(false, true)));
         return tools;
     }
 
@@ -292,10 +552,10 @@ public final class ExternalDocumentToolApplication {
         ((ObjectNode) schema.path("properties")).set("outputFormat", outputFormatSchema());
         ((ArrayNode) schema.path("required")).add("outputFormat");
         ObjectNode definitions = (ObjectNode) schema.path("$defs");
-        ArrayNode blocks = (ArrayNode) definitions.path("block").path("oneOf");
-        for (int i = blocks.size() - 1; i >= 0; i--) {
-            if ("#/$defs/imageBlock".equals(blocks.get(i).path("$ref").asText())) blocks.remove(i);
-        }
+        ObjectNode imageBlock = (ObjectNode) definitions.path("imageBlock");
+        ((ObjectNode) imageBlock.path("properties")).remove("source");
+        imageBlock.set("oneOf", mapper.createArrayNode().add(mapper.createObjectNode()
+                .set("required", mapper.createArrayNode().add("assetId"))));
         definitions.set("diagramSpec", classPathJson("/diagram-spec/1.0/schema.json"));
         ObjectNode inlineDiagram = mapper.createObjectNode();
         inlineDiagram.put("$ref", "#/$defs/diagramSpec");
@@ -353,6 +613,51 @@ public final class ExternalDocumentToolApplication {
         properties.set("sha256", sha);
         schema.putArray("required").add("artifactId").add("resourceUri").add("fileName")
                 .add("mediaType").add("size").add("sha256");
+        return schema;
+    }
+
+    private JsonNode assetStoreInputSchema() {
+        ObjectNode schema = emptyObjectSchema();
+        ObjectNode properties = (ObjectNode) schema.path("properties");
+        ObjectNode fileName = nonBlankString("Safe PNG/JPEG file name whose extension matches mediaType");
+        fileName.put("maxLength", 128);
+        fileName.put("pattern", "^[A-Za-z0-9._-]+\\.(?:[Pp][Nn][Gg]|[Jj][Pp][Ee]?[Gg])$");
+        properties.set("fileName", fileName);
+        ObjectNode mediaType = mapper.createObjectNode();
+        mediaType.put("type", "string");
+        mediaType.putArray("enum").add("image/png").add("image/jpeg");
+        properties.set("mediaType", mediaType);
+        ObjectNode content = nonBlankString("Base64 encoded image bytes");
+        content.put("maxLength", 13_981_016);
+        properties.set("contentBase64", content);
+        schema.putArray("required").add("fileName").add("mediaType").add("contentBase64");
+        return schema;
+    }
+
+    private JsonNode assetKeyInputSchema() {
+        ObjectNode schema = emptyObjectSchema();
+        ObjectNode id = nonBlankString("Managed image asset UUID");
+        id.put("format", "uuid");
+        ((ObjectNode) schema.path("properties")).set("assetId", id);
+        schema.putArray("required").add("assetId");
+        return schema;
+    }
+
+    private JsonNode assetOutputSchema(JsonNode artifactSchema) {
+        ObjectNode schema = emptyObjectSchema();
+        ObjectNode properties = (ObjectNode) schema.path("properties");
+        properties.set("assetId", nonBlankString("Managed image asset UUID"));
+        properties.set("artifact", artifactSchema);
+        schema.putArray("required").add("assetId").add("artifact");
+        return schema;
+    }
+
+    private JsonNode deleteAssetOutputSchema() {
+        ObjectNode schema = emptyObjectSchema();
+        ObjectNode properties = (ObjectNode) schema.path("properties");
+        properties.set("assetId", nonBlankString("Managed image asset UUID"));
+        properties.set("deleted", mapper.createObjectNode().put("type", "boolean"));
+        schema.putArray("required").add("assetId").add("deleted");
         return schema;
     }
 

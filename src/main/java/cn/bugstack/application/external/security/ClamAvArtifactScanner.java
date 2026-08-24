@@ -45,4 +45,27 @@ public final class ClamAvArtifactScanner implements ArtifactSecurityScanner {
             }
         }
     }
+
+    /** {@inheritDoc} */
+    @Override
+    public void scan(Path contentPath, String fileName, String mediaType) {
+        if (contentPath == null || !Files.isRegularFile(contentPath)) {
+            throw new ArtifactSecurityException("virus scan input is invalid");
+        }
+        try {
+            Process process = new ProcessBuilder(executable.toString(), "--no-summary", contentPath.toString())
+                    .redirectErrorStream(true).start();
+            boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                throw new ArtifactSecurityException("virus scan timed out");
+            }
+            if (process.exitValue() != 0) throw new ArtifactSecurityException("virus scan rejected artifact");
+        } catch (IOException e) {
+            throw new ArtifactSecurityException("virus scanner could not execute", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ArtifactSecurityException("virus scan was interrupted", e);
+        }
+    }
 }

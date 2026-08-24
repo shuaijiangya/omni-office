@@ -40,4 +40,34 @@ class LocalExternalArtifactStoreTest {
         assertThrows(IllegalArgumentException.class,
                 () -> store.resolve("omni-office://artifacts/../../secret"));
     }
+
+    @Test
+    void persistsPrincipalOwnershipAndRequiresExplicitAnyAccess() throws Exception {
+        LocalExternalArtifactStore store = new LocalExternalArtifactStore(
+                Files.createTempDirectory("external-artifact-owner"));
+        ExternalArtifactReference reference = store.storeForPrincipal(new byte[]{1, 2}, "artifact.bin",
+                "application/octet-stream", "alice");
+
+        assertEquals("alice", reference.getOwnerPrincipalId());
+        assertEquals("alice", store.resolveForPrincipal(reference.getResourceUri(), "alice", false)
+                .getReference().getOwnerPrincipalId());
+        assertThrows(IllegalArgumentException.class,
+                () -> store.resolveForPrincipal(reference.getResourceUri(), "bob", false));
+        assertEquals("alice", store.resolveForPrincipal(reference.getResourceUri(), "admin", true)
+                .getReference().getOwnerPrincipalId());
+    }
+
+    @Test
+    void storesFileBackedArtifactsThroughTheStreamingPath() throws Exception {
+        Path root = Files.createTempDirectory("external-artifact-stream");
+        Path input = Files.write(root.resolve("input.bin"), new byte[]{9, 8, 7, 6});
+        LocalExternalArtifactStore store = new LocalExternalArtifactStore(root.resolve("store"));
+
+        ExternalArtifactReference reference = store.storeForPrincipal(
+                input, "artifact.bin", "application/octet-stream", "alice");
+
+        assertEquals(4, reference.getSize());
+        assertArrayEquals(new byte[]{9, 8, 7, 6}, Files.readAllBytes(
+                store.resolveForPrincipal(reference.getResourceUri(), "alice", false).getContentPath()));
+    }
 }

@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /** 单租户原子文件任务仓库，作为开发模式和 PostgreSQL 实现的参考语义。 */
@@ -44,6 +46,9 @@ public final class FileGenerationJobRepository implements GenerationJobRepositor
     @Override
     public synchronized GenerationJobRecord create(GenerationJobRecord record, GenerationQuota quota,
                                                     Instant dayStart) {
+        if (record != null && record.getCurrentStage() == null) {
+            record.setCurrentStage(GenerationStage.QUEUED);
+        }
         validate(record);
         validateQuota(quota, dayStart);
         Path target = path(record.getJobId());
@@ -182,6 +187,24 @@ public final class FileGenerationJobRepository implements GenerationJobRepositor
     public synchronized List<GenerationJobRecord> list(GenerationJobStatus status,
                                                         Instant beforeCreatedAt,
                                                         String beforeJobId, int limit) {
+        return listForPrincipalInternal(null, status, beforeCreatedAt, beforeJobId, limit);
+    }
+
+    @Override
+    public synchronized List<GenerationJobRecord> listForPrincipal(String principalId,
+                                                                   GenerationJobStatus status,
+                                                                   Instant beforeCreatedAt,
+                                                                   String beforeJobId, int limit) {
+        if (principalId == null || !principalId.matches("[A-Za-z0-9._-]{1,64}")) {
+            throw new IllegalArgumentException("generation principal id is invalid");
+        }
+        return listForPrincipalInternal(principalId, status, beforeCreatedAt, beforeJobId, limit);
+    }
+
+    private List<GenerationJobRecord> listForPrincipalInternal(String principalId,
+                                                               GenerationJobStatus status,
+                                                               Instant beforeCreatedAt,
+                                                               String beforeJobId, int limit) {
         if (limit < 1) throw new IllegalArgumentException("generation job list limit must be positive");
         if ((beforeCreatedAt == null) != (beforeJobId == null)) {
             throw new IllegalArgumentException("generation job cursor is incomplete");
@@ -197,6 +220,7 @@ public final class FileGenerationJobRepository implements GenerationJobRepositor
         Comparator<GenerationJobRecord> ordering = Comparator
                 .comparing(GenerationJobRecord::getCreatedAt)
                 .thenComparing(GenerationJobRecord::getJobId).reversed();
+        result.removeIf(item -> principalId != null && !principalId.equals(item.getPrincipalId()));
         result.removeIf(item -> status != null && item.getStatus() != status);
         if (beforeCreatedAt != null) {
             GenerationJobRecord cursor = new GenerationJobRecord();
@@ -208,9 +232,44 @@ public final class FileGenerationJobRepository implements GenerationJobRepositor
         return new ArrayList<>(result.subList(0, Math.min(limit, result.size())));
     }
 
+    @Override
+    public synchronized Map<GenerationJobStatus, Long> countsByStatus() {
+        Map<GenerationJobStatus, Long> result = new EnumMap<>(GenerationJobStatus.class);
+        for (GenerationJobStatus status : GenerationJobStatus.values()) result.put(status, 0L);
+        for (GenerationJobRecord record : list(Integer.MAX_VALUE)) {
+            result.put(record.getStatus(), result.get(record.getStatus()) + 1L);
+        }
+        return result;
+    }
+
+    @Override
+    public synchronized int purgeTerminalBefore(Instant cutoff, int limit) {
+        if (cutoff == null || limit < 1 || limit > 10_000) {
+            throw new IllegalArgumentException("generation purge boundary is invalid");
+        }
+        List<GenerationJobRecord> candidates = list(Integer.MAX_VALUE).stream()
+                .filter(item -> item.getStatus().isTerminal())
+                .filter(item -> !item.getUpdatedAt().isAfter(cutoff))
+                .sorted(Comparator.comparing(GenerationJobRecord::getUpdatedAt))
+                .limit(limit).collect(java.util.stream.Collectors.toList());
+        int deleted = 0;
+        for (GenerationJobRecord candidate : candidates) {
+            try {
+                if (Files.deleteIfExists(path(candidate.getJobId()))) deleted++;
+            } catch (IOException e) {
+                throw new IllegalStateException("failed to purge generation job", e);
+            }
+        }
+        return deleted;
+    }
+
     private GenerationJobRecord read(Path path) {
         try {
             GenerationJobRecord value = mapper.readValue(path.toFile(), GenerationJobRecord.class);
+            if (value.getCurrentStage() == null) {
+                value.setCurrentStage(value.getStatus() == GenerationJobStatus.SUCCEEDED
+                        ? GenerationStage.COMPLETED : GenerationStage.QUEUED);
+            }
             validate(value);
             return value;
         } catch (IOException e) {
@@ -250,7 +309,8 @@ public final class FileGenerationJobRepository implements GenerationJobRepositor
     private void validate(GenerationJobRecord value) {
         if (value == null || value.getJobId() == null || value.getTenantId() == null
                 || value.getPrincipalId() == null || value.getMode() == null || value.getRequest() == null
-                || value.getStatus() == null || value.getCreatedAt() == null || value.getUpdatedAt() == null) {
+                || value.getStatus() == null || value.getCurrentStage() == null
+                || value.getCreatedAt() == null || value.getUpdatedAt() == null) {
             throw new IllegalArgumentException("generation job record is incomplete");
         }
         path(value.getJobId());

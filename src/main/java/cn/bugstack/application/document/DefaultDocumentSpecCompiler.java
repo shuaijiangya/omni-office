@@ -1,6 +1,7 @@
 package cn.bugstack.application.document;
 
 import cn.bugstack.export.document.CaptionTargetType;
+import cn.bugstack.export.document.CaptionPosition;
 import cn.bugstack.export.document.ReportCaption;
 import cn.bugstack.export.document.ReportDocument;
 import cn.bugstack.export.document.ReportElement;
@@ -11,6 +12,10 @@ import cn.bugstack.export.document.ReportPageBreak;
 import cn.bugstack.export.document.ReportParagraph;
 import cn.bugstack.export.document.ReportSection;
 import cn.bugstack.export.document.ReportTable;
+import cn.bugstack.export.document.ReportTableAlignment;
+import cn.bugstack.export.document.ReportTableMerge;
+import cn.bugstack.export.document.ReportTextRange;
+import cn.bugstack.export.document.ReportTextRangeStyle;
 import cn.bugstack.protocol.document.DocumentSpec;
 import cn.bugstack.protocol.document.SectionSpec;
 import cn.bugstack.protocol.document.block.AbstractListBlockSpec;
@@ -22,6 +27,9 @@ import cn.bugstack.protocol.document.block.PageBreakBlockSpec;
 import cn.bugstack.protocol.document.block.ParagraphBlockSpec;
 import cn.bugstack.protocol.document.block.SubsectionBlockSpec;
 import cn.bugstack.protocol.document.block.TableBlockSpec;
+import cn.bugstack.protocol.document.block.TableMergeSpec;
+import cn.bugstack.protocol.document.block.TextRangeSpec;
+import cn.bugstack.protocol.document.block.TextRangeStyleSpec;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -74,6 +82,12 @@ public final class DefaultDocumentSpecCompiler implements DocumentSpecCompiler {
             ParagraphBlockSpec source = (ParagraphBlockSpec) block;
             ReportParagraph target = new ReportParagraph(source.getText());
             target.setStyleName(source.getStyleName());
+            target.setFontColor(source.getFontColor());
+            for (TextRangeSpec range : source.getTextRanges()) {
+                ReportTextRange targetRange = new ReportTextRange(range.getText());
+                targetRange.setStyle(compileTextRangeStyle(range.getStyle()));
+                target.getTextRanges().add(targetRange);
+            }
             return target;
         }
         if (block instanceof TableBlockSpec) {
@@ -104,6 +118,7 @@ public final class DefaultDocumentSpecCompiler implements DocumentSpecCompiler {
         for (String item : source.getItems()) {
             ReportListItem listItem = new ReportListItem(listType, item);
             listItem.setStyleName(source.getStyleName());
+            listItem.setFontColor(source.getFontColor());
             target.addElement(listItem);
         }
     }
@@ -117,6 +132,16 @@ public final class DefaultDocumentSpecCompiler implements DocumentSpecCompiler {
         }
         target.setRows(rows);
         target.setStyleName(source.getStyleName());
+        target.setFontColor(source.getFontColor());
+        target.setHeaderTextStyle(compileTextRangeStyle(source.getHeaderTextStyle()));
+        target.setBodyTextStyle(compileTextRangeStyle(source.getBodyTextStyle()));
+        target.setAlignment(ReportTableAlignment.valueOf(source.getAlignment()));
+        List<ReportTableMerge> merges = new ArrayList<>();
+        for (TableMergeSpec merge : source.getMerges()) {
+            merges.add(new ReportTableMerge(merge.getStartRow(), merge.getStartColumn(),
+                    merge.getRowSpan(), merge.getColumnSpan()));
+        }
+        target.setMerges(merges);
         double[] widths = new double[source.getColumnWidths().size()];
         for (int i = 0; i < widths.length; i++) {
             widths[i] = source.getColumnWidths().get(i);
@@ -125,6 +150,7 @@ public final class DefaultDocumentSpecCompiler implements DocumentSpecCompiler {
         if (hasText(source.getCaption())) {
             ReportCaption caption = new ReportCaption(CaptionTargetType.TABLE, source.getCaption());
             caption.setAutoNumbered(source.isCaptionAutoNumbered());
+            caption.setPosition(CaptionPosition.valueOf(source.getCaptionPosition()));
             target.setCaption(caption);
         }
         return target;
@@ -136,8 +162,25 @@ public final class DefaultDocumentSpecCompiler implements DocumentSpecCompiler {
         target.setWidth(source.getWidth());
         target.setHeight(source.getHeight());
         if (hasText(source.getCaption())) {
-            target.setCaption(new ReportCaption(CaptionTargetType.IMAGE, source.getCaption()));
+            ReportCaption caption = new ReportCaption(CaptionTargetType.IMAGE, source.getCaption());
+            caption.setPosition(CaptionPosition.valueOf(source.getCaptionPosition()));
+            target.setCaption(caption);
         }
+        return target;
+    }
+
+    /** 将协议文本范围样式转换为 Report 层样式。 */
+    private ReportTextRangeStyle compileTextRangeStyle(TextRangeStyleSpec source) {
+        if (source == null) return null;
+        ReportTextRangeStyle target = new ReportTextRangeStyle();
+        target.setFontFamily(source.getFontFamily());
+        target.setAsciiFontFamily(source.getAsciiFontFamily());
+        target.setFarEastFontFamily(source.getFarEastFontFamily());
+        target.setFontSize(source.getFontSize());
+        target.setFontColor(source.getFontColor());
+        target.setBold(source.getBold());
+        target.setItalic(source.getItalic());
+        target.setUnderline(source.getUnderline());
         return target;
     }
 

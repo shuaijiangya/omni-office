@@ -14,6 +14,7 @@ DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 
 - 支持默认封面和实现 `ReportCoverTemplate` 的动态封面。
 - 内置“文档修改记录”表格封面模板，支持动态记录和空白填写行。
 - 封面、目录、业务正文使用三个独立 Word Section。
+- 启用目录时，目录后直接衔接第一个业务模块，不插入重复主标题或隐式基础信息表。
 - 目录页使用大写罗马数字 `I、II、III...`，业务正文重新从阿拉伯数字 `1` 开始。
 - 页脚默认仅显示页码，也可选择“第 N 页”格式。
 - 业务正文页眉可选，不设置时不会创建页眉。
@@ -61,7 +62,7 @@ DocumentSpec、DiagramSpec、工件目录和统一 export 的校验。
 | Jackson | 严格 JSON 编解码、协议消息和持久化元数据 |
 | NetworkNT JSON Schema Validator | 模板业务数据和协议 Schema 校验 |
 | JDK HttpServer/HttpClient | 独立 MCP HTTP 服务、Ollama 与客户端适配 |
-| PostgreSQL/Flyway/HikariCP | 多实例任务、幂等键、事务型 Webhook Outbox 与连接池 |
+| PostgreSQL/HikariCP | 多实例任务、幂等键、事务型 Webhook Outbox 与连接池；表结构由人工维护 |
 | AWS SDK for Java 2.x | S3、MinIO 及兼容对象存储适配 |
 | JUnit Jupiter | 单元测试和文档结构回归测试，版本 5.10.2 |
 | SVG/XML | 不依赖 Word 的用例图、流程图和 ER 图输出 |
@@ -150,6 +151,12 @@ Section 2：目录，独立页脚，页码从 I 开始
 Section 3：业务模块，可选页眉，页码重新从 1 开始
 ```
 
+Section 3 的首个正文元素及其样式由第一个业务模块决定，框架不要求它必须是 `Heading 1`。报告名称应放在封面，报告编号、
+编制信息等内容应放在封面模板或显式的“基本信息”业务模块，不应作为框架生成的内容夹在目录与正文之间。
+即使历史配置同时设置了 `tableOfContentsDepth` 和 `bodyTitleEnabled=true`，编译器也会优先保证该结构约束。
+只有未配置目录时，`bodyTitleEnabled=true` 才会在正文前输出报告主标题，并兼容输出已显式提供的
+`ReportBasicInfo`。
+
 目录和正文页脚会断开“链接到前一节”。正文内部后续增加 Section 时只在第一个正文 Section 重启页码，避免每个章节都重新回到 1。
 
 ### 7. 可扩展编译边界
@@ -173,6 +180,11 @@ lib/
 ├── aspose-words-26.6-jdk17.jar
 └── aspose-diagram-26.6.jar
 ```
+
+`scripts/bootstrap-aspose.sh` 只检查并保留已有文件，绝不会从公共仓库覆盖本地 JAR。GitHub Actions 需要配置
+`ASPOSE_WORDS_JAR_URL`、`ASPOSE_DIAGRAM_JAR_URL` 两个私有制品地址 Secret，并按需配置
+`ASPOSE_ARTIFACT_TOKEN`；脚本仅在文件完全不存在时下载，然后运行与发布前一致的
+`scripts/release-check.sh` 质量门禁。
 
 当前 `pom.xml` 使用 `systemPath` 引用这两个文件，因此缺少 JAR 时 Maven 无法编译。生产项目可以根据自己的制品仓库规范，将依赖安装到私服并把 `system` 依赖改为普通 Maven 依赖。
 
@@ -245,7 +257,72 @@ src/main/resources/document-spec/1.0/example-complete.json
 
 `DocumentSpecJsonCodec` 使用严格 JSON 反序列化，未知字段会被拒绝；
 `DocumentSpecValidator` 会在渲染前检查协议版本、必填内容、章节深度、块数量、文本长度、
-表格规模和样式白名单，并使用 JSON Path 返回错误位置。
+表格规模、媒体数量、页面设置和样式白名单，并使用 JSON Path 返回错误位置。业务 Export、内部 AI 与
+外部工具的能力边界见 [`docs/document-capabilities.md`](docs/document-capabilities.md)。
+
+正式文档建议将标题放入 `cover`，同时关闭正文重复标题：
+
+```json
+{
+  "layout": {
+    "bodyTitleEnabled": false,
+    "tableOfContentsDepth": 3
+  },
+  "cover": {
+    "documentName": "系统评估报告",
+    "projectName": "Omni Office",
+    "version": "V1.0"
+  },
+  "sections": [
+    {
+      "title": "评估概述",
+      "blocks": [
+        {"type": "paragraph", "text": "本模块正文由调用方定义。"}
+      ]
+    }
+  ]
+}
+```
+
+该结构的输出顺序为“封面 → 目录 → 第一个业务模块”。目录存在时，`bodyTitleEnabled=true` 也不会在目录后
+重复插入文档名称；此字段只用于兼容无目录文档。
+
+格式字段保持可选并兼容既有 JSON：段落、列表和表格可通过 `fontColor` 设置 `#RRGGBB` 字体颜色；
+段落可以继续使用单一 `text`，也可以改用有序 `textRanges`，为每个范围独立设置 `fontFamily`、`fontSize`、
+`fontColor`、`bold`、`italic` 和 `underline`。`text` 与 `textRanges` 必须且只能配置一种，范围中未设置的属性
+继承段落样式。
+表格默认占满当前页面正文的可用宽度，单元格文字水平、垂直居中；中文使用宋体，英文和数字使用
+Times New Roman（新罗马）。`TableStyle` 分别提供 `headerTextStyle` 与 `bodyTextStyle`：内置
+`TableHeader` 的表头默认为中文黑体、英文数字新罗马、不加粗、黑色，表内容默认为中文宋体、英文数字新罗马、
+常规、黑色；两者都可以独立配置通用字体、ASCII 字体、东亚字体、
+字号、颜色、粗体、斜体和下划线。单个 `textRange` 的显式样式优先级最高。
+`columnWidths` 作为列宽比例权重，
+例如 `[1, 2, 1]` 表示三列分别占 25%、50%、25%，未配置时各列等宽。表格通过 `alignment` 设置
+`LEFT/CENTER/RIGHT`，通过 `merges` 描述矩形合并区域；表格、图片和图形
+通过 `captionPosition` 设置题注位于 `ABOVE` 或 `BELOW`。合并坐标包含表头行，且区域内只有左上角
+允许包含文本，完整写法见 `example-complete.json`。
+
+上述字体只是内置默认值，并非渲染器固定值。业务 Builder 可通过
+`headerTextStyle/bodyTextStyle` 动态覆盖，DocumentSpec 也接受相同字段：
+
+```json
+{
+  "type": "table",
+  "headers": ["模块", "版本"],
+  "rows": [["DocumentSpec", "1.0"]],
+  "headerTextStyle": {
+    "asciiFontFamily": "Arial",
+    "farEastFontFamily": "微软雅黑"
+  },
+  "bodyTextStyle": {
+    "asciiFontFamily": "Calibri",
+    "farEastFontFamily": "仿宋"
+  }
+}
+```
+
+未配置的属性继承 `StyleProfile` 中的 `TableStyle`；单表配置只覆盖非空属性，因此可以只替换中文字体或只替换
+英文数字字体。`fontFamily` 是兼容性的统一字体入口，`asciiFontFamily` 和 `farEastFontFamily` 的优先级更高。
 
 M2 提供 `DiagramSpec 1.0`、受控图工件存储和 Word 图形嵌入。`diagram` block 可以直接
 携带 `definition`，也可以通过 `diagramArtifactId` 复用提前生成的 VSDX/PNG 工件：
@@ -390,9 +467,14 @@ DocumentSpec 映射和安全校验，再由统一 export 生成两个格式。�
 | `omni_template_export` | 模板标识、版本、业务数据、格式 | DOCX/PDF/HTML 工件引用 |
 | `omni_document_export` | DocumentSpec 1.0 加 `outputFormat` | DOCX/PDF/HTML 工件引用 |
 | `omni_diagram_generate` | DiagramSpec 1.0 | `diagramArtifactId`、VSDX 与 PNG 工件引用 |
+| `omni_asset_store` | Base64 PNG/JPEG，最大 10 MiB | 当前主体私有的 `assetId` |
+| `omni_asset_get` | `assetId` | 当前主体图片资产元数据 |
+| `omni_asset_delete` | `assetId` | 删除当前主体图片资产 |
 
 图工具返回的 `diagramArtifactId` 可以继续写入 DocumentSpec 的 `diagram` block。这样外部 AI 可以先选择
 标准图类型并生成图工件，再把同一工件嵌入 Word；也可以直接在 DocumentSpec 中提交内联 DiagramSpec。
+外部图片不得提交 URL 或服务器文件路径：先使用 `omni_asset_store` 获取 `assetId`，再写入 `image` block；
+Asset ID 只能由创建它的主体读取、嵌入或删除。
 
 Function Calling 适配器输出常见的 `type=function/function.parameters` 工具数组：
 
@@ -519,8 +601,14 @@ MVN_BIN=/absolute/path/to/mvn \
   system.assessment 1.0.0 author
 
 ./scripts/template-admin.sh target/omni-office-service default approve \
-  system.assessment 1.0.0 reviewer 'schema and mapping reviewed'
+  system.assessment 1.0.0 reviewer \
+  src/main/resources/document-template/1.0/example-assessment-data.json \
+  'schema, mapping and sample render reviewed'
 ```
+
+发布审批必须携带对象类型的代表性 `sampleData`。系统依次执行数据 Schema 校验、模板展开、DocumentSpec
+校验、真实 DOCX 渲染和 OOXML 回读，并在版本记录中保存样例摘要、渲染摘要、大小和验证时间；失败时版本
+保持 `IN_REVIEW`。受信任的启动期内置模板注册不走业务审核工作流。
 
 `ProtocolSchemaRegistry` 保存不可覆盖的协议 Schema 版本和 SHA-256；
 `JsonSchemaCompatibilityChecker` 检查新增必填字段、删除字段和字段类型变化；
@@ -542,7 +630,7 @@ JSON Lines 轨迹库可直接用于单实例部署；生产环境可以实现 `A
 
 ### 产物生命周期、安全扫描和异步任务
 
-M9 的 `ExternalArtifactStore` 是本地盘和对象存储的统一边界。默认本地产物保存 24 小时，元数据包含
+M9 的 `ExternalArtifactStore` 是本地盘和对象存储的统一边界。默认文档、托管图片、图工件和 AI 草稿统一保存 30 天，元数据包含
 创建时间、过期时间、大小和 SHA-256；HTTP 服务每小时清理过期产物，读取时再次校验元数据。
 `ObjectStorageExternalArtifactStore` 可通过 `ArtifactObjectStorage` 适配 S3、OSS 或 MinIO，并只在服务端
 受控目录建立读取缓存。
@@ -551,7 +639,7 @@ M9 的 `ExternalArtifactStore` 是本地盘和对象存储的统一边界。默�
 
 - 文件签名与声明媒体类型一致；
 - ZIP 条目数量、总解压大小、重复条目和路径穿越；
-- OOXML 外部关系阻断；
+- OOXML 外部图片、模板、OLE 等危险关系阻断；仅允许 `http`、`https`、`mailto` 超链接；
 - 内容大小和发布后摘要一致性。
 
 `SensitiveDataArtifactScanner` 可用于阻断文本中的私钥或疑似密钥；`ClamAvArtifactScanner` 可调用绝对路径
@@ -594,14 +682,17 @@ M11 第一阶段在现有 MCP HTTP 服务中增加独立 REST 契约。普通业
 
 | 端点 | 权限 | 用途 |
 | --- | --- | --- |
-| `POST /v1/generation-jobs` | `generation:create` | 提交 `DOCUMENT_SPEC` 或 `TEMPLATE_DATA` 任务 |
-| `GET /v1/generation-jobs?limit=20&status=SUCCEEDED&cursor=...` | `generation:read` | 按状态和稳定游标列出当前租户任务 |
-| `GET /v1/generation-jobs/{jobId}` | `generation:read` | 查询任务状态、错误和工件 |
-| `POST /v1/generation-jobs/{jobId}/cancel` | `generation:cancel` | 取消尚未终结的任务 |
+| `POST /v1/generation-jobs` | `generation:create` | 提交确定性或内部 AI 生成任务；AI 模式还需 `ai:generate` |
+| `GET /v1/generation-jobs?limit=20&status=SUCCEEDED&cursor=...` | `generation:read` | 按状态和稳定游标列出当前主体任务 |
+| `GET /v1/generation-jobs/{jobId}` | `generation:read` | 查询当前主体任务的状态、错误和工件 |
+| `POST /v1/generation-jobs/{jobId}/cancel` | `generation:cancel` | 取消当前主体尚未终结的任务 |
+| `POST /v1/generation-jobs/{jobId}/approve` | `ai:review` | 审批 AI 草稿并继续确定性渲染 |
+| `POST /v1/generation-jobs/{jobId}/reject` | `ai:review` | 驳回 AI 草稿并终结任务 |
 | `GET /v1/generation-jobs/{jobId}/artifacts` | `generation:read` | 获取任务工件元数据 |
 | `POST /v1/document-specs/validate` | `generation:create` | 无副作用校验 DocumentSpec |
 | `POST /v1/templates/{id}/versions/{version}/validate-data` | `generation:create` | 校验模板数据和展开结果 |
 | `GET /v1/webhook-deliveries?limit=20` | `webhook:read` | 查询本租户投递状态与重试审计 |
+| `POST /v1/webhook-deliveries/{eventId}/redrive` | `webhook:redrive` | 将本租户 DEAD 事件重新加入队列 |
 | `GET/POST /v1/admin/templates` | `templates:read/write` | 查询模板版本或创建草稿 |
 | `POST /v1/admin/templates/{id}/versions/{version}/{action}` | `templates:write/review` | 提交、审批、驳回或退役模板 |
 | `GET /v1/admin/templates/{id}/compare` | `templates:read` | 比较两个版本的数据 Schema 兼容性 |
@@ -612,12 +703,44 @@ M11 第一阶段在现有 MCP HTTP 服务中增加独立 REST 契约。普通业
 请求返回原任务，相同键但请求内容变化返回 `409`。成功任务只保存受控 `resourceUri` 与工件摘要，
 不保存或暴露服务器路径。
 
+任务和新生成工件默认绑定提交主体。同租户其他主体查询、取消或下载时统一返回不存在；租户管理员必须显式
+获得 `generation:read:any`、`generation:cancel:any` 或 `artifacts:read:any` 才能跨主体操作。API Key 的
+`key=tenant:principal` 简写只授予 MCP、生成和本人工件权限；显式权限使用
+`key=tenant:principal:scope1|scope2`，仅受控管理员才应配置 `*`。
+
 列表接口按 `createdAt + jobId` 倒序，`nextCursor` 是不透明游标，调用方不应解析或自行构造。可选
 `status` 过滤任务状态。管理员还可通过仓库外的 `OMNI_OFFICE_QUOTA_CONFIG_PATH` 配置租户
 `maxActiveJobs` 和 `maxJobsPerDay`（按 UTC 自然日计算）；PostgreSQL 模式使用事务级租户锁原子准入，
 并发实例不会穿透上限。
 配置结构参考 `quota-config.example.json`。达到上限返回 `429 GENERATION_QUOTA_EXCEEDED` 和
 `Retry-After`，幂等重放已有任务不会重复占用配额。
+
+任务响应包含 `currentStage`、`stageStartedAt` 和 `deadlineAt`，可区分 AI 生成/审核、模板组装、文档校验、
+图生成、渲染、安全扫描和工件存储。单次执行默认 15 分钟超时；多租户应用共享有界 Worker 池，队列长度与
+活跃 Worker 数通过 `/metrics` 暴露，避免租户数增长时线性创建线程。DocumentSpec 校验响应还包含字符数、
+表格单元格、媒体块和预计页数，调用方可在正式提交前做成本提示。
+
+内部 AI 也复用同一 Generation Job：`AI_FREEFORM` 先生成并校验 DocumentSpec，`AI_TEMPLATE` 只让模型填充
+指定模板版本的数据；随后仍由确定性的模板/DocumentSpec/export 链生成工件。设置
+`OMNI_OFFICE_OLLAMA_MODEL=qwen3.5:2b` 即可启用本地 Ollama，可用
+`OMNI_OFFICE_OLLAMA_CHAT_ENDPOINT` 覆盖 `/api/chat` 地址。AI 模式必须同时具备 `generation:create` 和
+`ai:generate`，默认 API Key 简写不包含 AI 权限。模型调用轨迹只记录输入/上下文/输出摘要和耗时，写入
+`dataRoot/ai/traces.jsonl`。任务到达 `PENDING_REVIEW` 或任一终态后会移除指令、上下文和完整正文，只保留
+模式、格式、模板标识、审核策略等最小运行元数据；上下文仍不应携带未获授权的秘密。
+
+```json
+{
+  "mode": "AI_FREEFORM",
+  "outputFormat": "DOCX",
+  "reviewPolicy": "REQUIRED",
+  "instruction": "生成一份系统评估报告",
+  "context": {"systemName": "Omni Office"}
+}
+```
+
+`reviewPolicy=AUTO`（默认）会在结构校验通过后直接渲染；`REQUIRED` 会进入 `PENDING_REVIEW`。审批人必须
+拥有 `ai:review` 且不能是任务创建者，批准后同一任务使用已冻结的 DocumentSpec 继续执行，不会再次调用模型。
+待审核期限与 Generation Job 保留配置一致；超期任务以 `AI_REVIEW_EXPIRED` 终结，草稿快照也按统一保留期清理。
 
 任务可以携带可选 `webhookId`，但不能提交回调 URL。服务只解析管理员通过
 `OMNI_OFFICE_WEBHOOK_CONFIG_PATH` 预注册的租户端点。配置文件必须位于仓库外且使用绝对路径，结构可参考
@@ -628,8 +751,16 @@ M11 第一阶段在现有 MCP HTTP 服务中增加独立 REST 契约。普通业
 `timestamp + "." + rawBody`。`408`、`429` 和 `5xx` 使用指数退避重试，其他 `4xx` 直接进入 `DEAD`。
 接收方应按事件 ID 去重。事件只包含任务、错误与工件摘要，不复制模板数据或 DocumentSpec 正文。
 
+服务启动时会扫描持久化租户并恢复尚未终结的任务，不再依赖某个租户先收到 HTTP 请求。管理员可对
+`DEAD` 投递执行 redrive；事件 ID 和累计尝试次数保持不变，每次操作增加 5 次重试预算并写入审计日志。
+终态任务和 Webhook 记录默认保留 30 天，由每小时生命周期任务分批清理。可分别通过
+`OMNI_OFFICE_GENERATION_JOB_RETENTION_DAYS` 和 `OMNI_OFFICE_WEBHOOK_RETENTION_DAYS` 调整，且任务保留期
+不得短于 Webhook 保留期，以避免仍在审计期内的事件失去任务上下文。文档、Asset 和图工件使用
+`OMNI_OFFICE_ARTIFACT_RETENTION_HOURS`，其保留期不得短于任务保留期，避免任务仍可查询但工件已失效。
+
 默认 `FileGenerationJobRepository` 与 `FileWebhookDeliveryRepository` 仍是单实例开发实现。设置数据库
-配置后，Flyway 自动创建任务与 Outbox 表，PostgreSQL 唯一索引负责跨实例幂等，Worker 和 Webhook
+配置后，应用只连接既有数据库，不会自动创建或变更表结构；数据库对象由运维人员维护。PostgreSQL 唯一索引
+负责跨实例幂等，Worker 和 Webhook
 Dispatcher 使用带过期时间的租约与 `FOR UPDATE SKIP LOCKED` 原子领取。Worker 只允许在持有有效租约时
 提交结果；崩溃实例的租约到期后才会被其他实例恢复，不再在新实例启动时重置全部运行中任务。
 
@@ -656,7 +787,7 @@ M12 同时提供 `OmniOfficeGenerationClient` Java SDK。SDK 支持 API Key/Bear
 
 M13 的 `/health/ready` 会分别报告数据目录、任务仓储和工件存储状态。`/metrics` 除全局计数外，还提供
 固定 `route/status` 标签的请求计数、各路由耗时 sum/count、运行时长、Generation Job/Webhook 状态，以及
-工件清理次数、错误和删除数量。指标刻意不使用 tenant、principal、jobId 等高基数或敏感标签。
+工件清理次数、错误和删除数量、共享生成队列长度及活跃 Worker 数。指标刻意不使用 tenant、principal、jobId 等高基数或敏感标签。
 Prometheus 告警规则位于 `deploy/prometheus-alerts.yml`，依赖故障、租约恢复、Webhook 死信、工件清理和
 发布演练步骤见 `docs/operations-runbook.md`。
 
@@ -684,10 +815,11 @@ MAVEN_BIN=/Users/luojiang/maven/apache-maven-3.6.3/bin/mvn ./scripts/release-che
 | M10 | 服务配置、健康/指标、Docker/Compose 与 HTML 输出 |
 | M11-A | Generation Job 状态机、原子文件仓储、幂等/恢复/取消、REST 与 OpenAPI |
 | M11-B | 预注册 Webhook、终态事件 Outbox、HMAC 签名、重试、指标与投递审计 |
-| M11-C | PostgreSQL/Flyway、跨实例租约抢占、事务型 Outbox、OIDC/JWKS 与 S3/MinIO 工件适配 |
+| M11-C | PostgreSQL、跨实例租约抢占、事务型 Outbox、OIDC/JWKS 与 S3/MinIO 工件适配 |
 | M12 | 模板管理 REST API、四眼审核/退役、Schema 比较、任务稳定分页、原子租户配额与 Java REST SDK |
 | M13 | 依赖级就绪检查、租户运维汇总、低基数请求/耗时/清理指标、Prometheus 告警与故障演练手册 |
 | M14 | 契约一致性测试、API 兼容/弃用策略、可执行发布检查、备份恢复及安全发布清单 |
+| M15+ | AI 审核任务一体化、阶段/超时/隐私最小化、托管 Asset ID、模板样例渲染门禁、统一工件生命周期、流式发布与 DocumentSpec 前置页/页面设置 |
 
 未显式设置的报告内容会使用以下默认值：
 
@@ -702,6 +834,10 @@ MAVEN_BIN=/Users/luojiang/maven/apache-maven-3.6.3/bin/mvn ./scripts/release-che
 | 正文大标题 | 默认不重复输出 |
 | 标题编号 | 默认启用 |
 | 基础信息表格 | 默认不生成 |
+
+启用目录时，目录后的正文 Section 直接衔接第一个业务模块，首个元素类型和样式由模块决定。框架不会在两者之间插入重复的报告主标题、
+基础信息表或其他前导内容；需要展示的基础信息应放入封面模板或显式业务模块。`bodyTitleEnabled`
+仅对无目录文档生效，避免历史配置破坏正式报告结构。
 
 ### 编译与测试
 
@@ -718,7 +854,7 @@ mvn -DskipTests javadoc:javadoc
 直接执行上述目标时，生成结果位于 `target/reports/apidocs/`。任务仓储、租约、配额、Webhook、模板治理、REST SDK、OIDC 和
 对象存储等公共扩展点均在 Javadoc 中说明参数、返回值、异常和并发/安全边界。
 
-截至 2026-08-21，完整测试集包含 170 项测试，结果为 0 failure、0 error、0 skipped；覆盖真实本地 HTTP
+截至 2026-08-24，完整测试集包含 203 项测试，结果为 0 failure、0 error、0 skipped；覆盖真实本地 HTTP
 会话、多租户隔离、异步任务、模板治理、AI 审核以及 DOCX 结构。生成的 DOCX、PDF、HTML、SVG、VSDX
 和测试产物位于 `target/`，该目录不会提交到 Git。
 
@@ -918,6 +1054,9 @@ java -cp "target/classes:lib/*" \
   cn.bugstack.export.example.composable.ComposableTextReportExportExample
 
 java -cp "target/classes:lib/*" \
+  cn.bugstack.export.example.FormattingCapabilitiesReportExportExample
+
+java -cp "target/classes:lib/*" \
   cn.bugstack.office.docx.example.DocxWrapperExample
 
 java -cp "target/classes:lib/*" \
@@ -932,6 +1071,7 @@ Windows 请把 classpath 中的 `:` 替换为 `;`。
 | --- | --- |
 | `ComposableTextReportExportExample` | 任意组合评估模块的 DOCX 报告 |
 | `AssessmentReportExportExample` | 使用通用定义、模块计划和语义文档生成评估报告 |
+| `FormattingCapabilitiesReportExportExample` | 同段多文本样式、页面自适应表格、默认居中、合并与题注位置 |
 | `DocxWrapperExample` | 封面、修订记录、审批页、目录、列表、图片、题注、表格和类设计表格 |
 | `EditableVisioWordExample` | Word 中的 Visio 预览和可编辑 Visio 文件 |
 | `MultiLevelHeadingExample` | Word 原生一至九级标题编号 |
@@ -1015,8 +1155,8 @@ public final class CustomCoverTemplate implements ReportCoverTemplate {
 - Word 原生九级标题编号和自动目录域。
 - 分节页眉页脚、PAGE 域和独立页码体系。
 - 默认封面、动态封面、修订记录页和审批页。
-- 表格列宽、表头、跨列、纵向合并和单元格对齐。
-- 图片、Visio 预览、题注、题注引用、列表和分页。
+- 字体颜色，以及表格页面宽度自适应、列宽比例、单元格文字默认居中、表头、跨列、纵向与矩形合并。
+- 图片、Visio 预览、上下方题注、题注引用、列表和分页。
 - 基于源码和 Javadoc 的类设计表格生成。
 - Aspose License 的安全外部加载。
 
@@ -1055,6 +1195,7 @@ public final class CustomCoverTemplate implements ReportCoverTemplate {
 - 八个强类型模块的完整导出。
 - 默认封面、动态表格封面和空白填写行。
 - 封面、目录、正文三个 Section 的结构。
+- 目录后直接衔接第一个业务模块，且不存在框架生成的重复主标题或隐式基础信息表。
 - 目录罗马页码和正文阿拉伯页码重启。
 - 页眉可选、页脚独立和 PAGE 域。
 - 标题编号、目录域、题注引用和表格结构。

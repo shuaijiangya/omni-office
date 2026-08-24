@@ -122,10 +122,10 @@ class VsdxDiagramRendererTest {
                 .edge(new DiagramEdge("user", "user-name"))
                 .build();
 
-        VisioDiagramArtifact artifact = new VsdxDiagramRenderer()
-                .render(definition, temporaryDirectory.resolve("system-er.vsdx"));
+        VsdxDiagramRenderer renderer = new VsdxDiagramRenderer();
+        VisioDiagramArtifact artifact = renderer.render(definition, temporaryDirectory.resolve("system-er.vsdx"));
 
-        Diagram loaded = new Diagram(artifact.getVsdxPath().toString());
+        Diagram loaded = renderer.compose(definition);
         try {
             assertTrue(Files.exists(artifact.getPreviewPngPath()));
             assertTrue(containsPureText(loaded, "用户"));
@@ -152,12 +152,12 @@ class VsdxDiagramRendererTest {
                 .edge(new DiagramEdge("service", "repository", "依赖"))
                 .build();
 
-        VisioDiagramArtifact artifact = new VsdxDiagramRenderer()
-                .render(definition, temporaryDirectory.resolve("risk-class.vsdx"));
+        VsdxDiagramRenderer renderer = new VsdxDiagramRenderer();
+        VisioDiagramArtifact artifact = renderer.render(definition, temporaryDirectory.resolve("risk-class.vsdx"));
 
         assertTrue(Files.exists(artifact.getVsdxPath()));
         assertTrue(Files.exists(artifact.getPreviewPngPath()));
-        Diagram loaded = new Diagram(artifact.getVsdxPath().toString());
+        Diagram loaded = renderer.compose(definition);
         try {
             assertTrue(loaded.getPages().getPage(0).getShapes().getCount() >= 12);
             assertTrue(hasSmallFourCenteredText(loaded));
@@ -189,12 +189,13 @@ class VsdxDiagramRendererTest {
                 .edge(new DiagramEdge("assess", "level"))
                 .build();
 
-        VisioDiagramArtifact artifact = new VsdxDiagramRenderer().render(definition,
+        VsdxDiagramRenderer renderer = new VsdxDiagramRenderer();
+        VisioDiagramArtifact artifact = renderer.render(definition,
                 temporaryDirectory.resolve("overall-function-logic.vsdx"));
 
         assertTrue(Files.exists(artifact.getVsdxPath()));
         assertTrue(Files.exists(artifact.getPreviewPngPath()));
-        Diagram loaded = new Diagram(artifact.getVsdxPath().toString());
+        Diagram loaded = renderer.compose(definition);
         try {
             assertTrue(containsPureText(loaded, "风险管理系统"));
             assertTrue(containsPureText(loaded, "风险登记"));
@@ -303,10 +304,10 @@ class VsdxDiagramRendererTest {
                 .edge(new DiagramEdge("entity", "repository", "关联"))
                 .build();
 
-        VisioDiagramArtifact artifact = new VsdxDiagramRenderer()
-                .render(definition, temporaryDirectory.resolve("class-label-layout.vsdx"));
+        VsdxDiagramRenderer renderer = new VsdxDiagramRenderer();
+        renderer.render(definition, temporaryDirectory.resolve("class-label-layout.vsdx"));
 
-        Diagram loaded = new Diagram(artifact.getVsdxPath().toString());
+        Diagram loaded = renderer.compose(definition);
         try {
             assertTrue(hasDistinctClassRelationLabelPositions(loaded, 4));
         } finally {
@@ -358,9 +359,10 @@ class VsdxDiagramRendererTest {
         );
 
         for (RelationLabelCase relationCase : cases) {
-            VisioDiagramArtifact artifact = new VsdxDiagramRenderer().render(relationCase.getDefinition(),
+            VsdxDiagramRenderer renderer = new VsdxDiagramRenderer();
+            renderer.render(relationCase.getDefinition(),
                     temporaryDirectory.resolve(relationCase.getFileStem() + ".vsdx"));
-            Diagram loaded = new Diagram(artifact.getVsdxPath().toString());
+            Diagram loaded = renderer.compose(relationCase.getDefinition());
             try {
                 assertLabelAtConnectorMidpoint(loaded, relationCase.getLabelPrefix(),
                         relationCase.getConnectorPrefix());

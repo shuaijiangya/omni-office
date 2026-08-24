@@ -99,11 +99,16 @@
     "layout": {
       "styleProfile": "BUSINESS_BRIEF",
       "headingNumberingEnabled": true,
-      "bodyTitleEnabled": true,
+      "bodyTitleEnabled": false,
       "tableOfContentsDepth": 3,
       "headerText": "Omni Office AI Demo",
       "pageNumberFooterEnabled": true,
       "bodyPageNumberStart": 1
+    },
+    "cover": {
+      "documentName": "Omni Office AI 文档生成能力演示报告",
+      "projectName": "Omni Office",
+      "version": "V1.0"
     },
     "sections": [
       {

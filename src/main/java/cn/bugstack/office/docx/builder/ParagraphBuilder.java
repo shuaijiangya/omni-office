@@ -7,6 +7,9 @@ import cn.bugstack.office.docx.model.ParagraphListType;
 import cn.bugstack.office.docx.model.ParagraphNode;
 import cn.bugstack.office.docx.model.TextRunInline;
 import cn.bugstack.office.docx.model.VisioInline;
+import cn.bugstack.office.docx.style.RunStyle;
+
+import java.util.function.Consumer;
 
 /**
  * Paragraph 级 Builder，用于向段落中添加行内内容。
@@ -73,6 +76,46 @@ public class ParagraphBuilder<P> {
      */
     public ParagraphBuilder<P> text(String text) {
         paragraph.addInline(new TextRunInline(text));
+        return this;
+    }
+
+    /**
+     * 向段落追加指定字体颜色的文本 run。
+     *
+     * @param text 文本内容
+     * @param fontColor 字体颜色，格式为 {@code #RRGGBB}；为空时继承段落样式
+     * @return 当前段落 Builder
+     */
+    public ParagraphBuilder<P> text(String text, String fontColor) {
+        paragraph.addInline(new TextRunInline(text, fontColor));
+        return this;
+    }
+
+    /**
+     * 向段落追加具有独立样式的文本范围。
+     *
+     * @param text 文本内容
+     * @param styleCustomizer 字体、字号、颜色及文字效果配置
+     * @return 当前段落 Builder
+     */
+    public ParagraphBuilder<P> text(String text, Consumer<RunStyle> styleCustomizer) {
+        RunStyle style = new RunStyle();
+        if (styleCustomizer != null) {
+            styleCustomizer.accept(style);
+        }
+        paragraph.addInline(new TextRunInline(text, style));
+        return this;
+    }
+
+    /**
+     * 向段落追加预先构造好独立样式的文本范围。
+     *
+     * @param text 文本内容
+     * @param style 文本范围样式；为空时继承段落样式
+     * @return 当前段落 Builder
+     */
+    public ParagraphBuilder<P> text(String text, RunStyle style) {
+        paragraph.addInline(new TextRunInline(text, style));
         return this;
     }
 

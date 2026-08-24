@@ -6,6 +6,8 @@ import cn.bugstack.application.external.ExternalArtifactStoreProvider;
 import cn.bugstack.application.external.LocalExternalArtifactStoreProvider;
 import cn.bugstack.application.audit.AuditEvent;
 import cn.bugstack.application.audit.AuditLog;
+import cn.bugstack.application.ai.StructuredAiClient;
+import cn.bugstack.application.concurrent.BoundedExecutors;
 import cn.bugstack.application.external.mcp.McpJsonRpcServer;
 import cn.bugstack.application.external.security.AuthenticationException;
 import cn.bugstack.application.external.security.HttpAuthenticationRequest;
@@ -65,11 +67,12 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 import com.sun.net.httpserver.HttpHandler;
@@ -85,8 +88,8 @@ public final class McpHttpServer implements AutoCloseable {
     private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     private final HttpServer server;
-    private final ExecutorService httpExecutor;
-    private final ExecutorService operationExecutor;
+    private final ThreadPoolExecutor httpExecutor;
+    private final ThreadPoolExecutor operationExecutor;
     private final ConcurrentMap<String, Session> sessions = new ConcurrentHashMap<>();
     private final IdentityRateLimiter rateLimiter;
     private final Semaphore concurrency;
@@ -95,6 +98,9 @@ public final class McpHttpServer implements AutoCloseable {
     private final ScheduledExecutorService maintenanceExecutor;
     private final WebhookDeliveryRepository webhookDeliveries;
     private final WebhookDispatcher webhookDispatcher;
+    private final GenerationJobRepositoryProvider jobRepositories;
+    private final Duration generationJobRetention;
+    private final Duration webhookRetention;
     private final AtomicLong requestsTotal = new AtomicLong();
     private final AtomicLong errorsTotal = new AtomicLong();
     private final AtomicLong downloadsTotal = new AtomicLong();
@@ -104,6 +110,9 @@ public final class McpHttpServer implements AutoCloseable {
     private final AtomicLong artifactCleanupRunsTotal = new AtomicLong();
     private final AtomicLong artifactCleanupErrorsTotal = new AtomicLong();
     private final AtomicLong artifactsPurgedTotal = new AtomicLong();
+    private final AtomicLong generationJobsPurgedTotal = new AtomicLong();
+    private final AtomicLong webhookDeliveriesPurgedTotal = new AtomicLong();
+    private final AtomicLong lifecycleCleanupErrorsTotal = new AtomicLong();
     private final Instant serviceStartedAt;
 
     /**
@@ -173,7 +182,50 @@ public final class McpHttpServer implements AutoCloseable {
                          ExternalArtifactStoreProvider artifactStores,
                          GenerationQuotaPolicy quotaPolicy) {
         this(config, authenticator, auditLog, Clock.systemUTC(), jobRepositories, artifactStores,
-                quotaPolicy);
+                quotaPolicy, Duration.ofDays(30), Duration.ofDays(30));
+    }
+
+    /**
+     * 创建带持久化生命周期策略的完整 HTTP 服务。
+     *
+     * @param config 服务配置
+     * @param authenticator HTTP 身份认证器
+     * @param auditLog 审计日志
+     * @param jobRepositories 任务仓储提供器
+     * @param artifactStores 工件库提供器
+     * @param quotaPolicy 租户配额策略
+     * @param generationJobRetention 终态任务保留时间
+     * @param webhookRetention 终态 Webhook 记录保留时间
+     */
+    public McpHttpServer(McpHttpServerConfig config, HttpAuthenticator authenticator, AuditLog auditLog,
+                         GenerationJobRepositoryProvider jobRepositories,
+                         ExternalArtifactStoreProvider artifactStores,
+                         GenerationQuotaPolicy quotaPolicy, Duration generationJobRetention,
+                         Duration webhookRetention) {
+        this(config, authenticator, auditLog, Clock.systemUTC(), jobRepositories, artifactStores,
+                quotaPolicy, generationJobRetention, webhookRetention);
+    }
+
+    /**
+     * 创建带持久化生命周期策略和可选内部 AI 的完整 HTTP 服务。
+     *
+     * @param config 服务配置
+     * @param authenticator HTTP 身份认证器
+     * @param auditLog 审计日志
+     * @param jobRepositories 任务仓储提供器
+     * @param artifactStores 工件库提供器
+     * @param quotaPolicy 租户配额策略
+     * @param generationJobRetention 终态任务保留时间
+     * @param webhookRetention 终态 Webhook 记录保留时间
+     * @param aiClient 结构化 AI 客户端；为空时关闭 AI 任务模式
+     */
+    public McpHttpServer(McpHttpServerConfig config, HttpAuthenticator authenticator, AuditLog auditLog,
+                         GenerationJobRepositoryProvider jobRepositories,
+                         ExternalArtifactStoreProvider artifactStores,
+                         GenerationQuotaPolicy quotaPolicy, Duration generationJobRetention,
+                         Duration webhookRetention, StructuredAiClient aiClient) {
+        this(config, authenticator, auditLog, Clock.systemUTC(), jobRepositories, artifactStores,
+                quotaPolicy, generationJobRetention, webhookRetention, aiClient);
     }
 
     McpHttpServer(McpHttpServerConfig config, HttpAuthenticator authenticator, Clock clock) {
@@ -193,26 +245,55 @@ public final class McpHttpServer implements AutoCloseable {
                   AuditLog auditLog, Clock clock, GenerationJobRepositoryProvider jobRepositories,
                   ExternalArtifactStoreProvider artifactStores) {
         this(config, authenticator, auditLog, clock, jobRepositories, artifactStores,
-                GenerationQuotaPolicy.unlimited());
+                GenerationQuotaPolicy.unlimited(), Duration.ofDays(30), Duration.ofDays(30));
     }
 
     McpHttpServer(McpHttpServerConfig config, HttpAuthenticator authenticator,
                   AuditLog auditLog, Clock clock, GenerationJobRepositoryProvider jobRepositories,
                   ExternalArtifactStoreProvider artifactStores, GenerationQuotaPolicy quotaPolicy) {
+        this(config, authenticator, auditLog, clock, jobRepositories, artifactStores, quotaPolicy,
+                Duration.ofDays(30), Duration.ofDays(30));
+    }
+
+    McpHttpServer(McpHttpServerConfig config, HttpAuthenticator authenticator,
+                  AuditLog auditLog, Clock clock, GenerationJobRepositoryProvider jobRepositories,
+                  ExternalArtifactStoreProvider artifactStores, GenerationQuotaPolicy quotaPolicy,
+                  Duration generationJobRetention, Duration webhookRetention) {
+        this(config, authenticator, auditLog, clock, jobRepositories, artifactStores, quotaPolicy,
+                generationJobRetention, webhookRetention, null);
+    }
+
+    McpHttpServer(McpHttpServerConfig config, HttpAuthenticator authenticator,
+                  AuditLog auditLog, Clock clock, GenerationJobRepositoryProvider jobRepositories,
+                  ExternalArtifactStoreProvider artifactStores, GenerationQuotaPolicy quotaPolicy,
+                  Duration generationJobRetention, Duration webhookRetention,
+                  StructuredAiClient aiClient) {
         if (config == null || authenticator == null || clock == null) {
             throw new IllegalArgumentException("MCP HTTP config, authenticator and clock are required");
+        }
+        if (jobRepositories == null || artifactStores == null || quotaPolicy == null
+                || generationJobRetention == null || generationJobRetention.isZero()
+                || generationJobRetention.isNegative() || webhookRetention == null
+                || webhookRetention.isZero() || webhookRetention.isNegative()
+                || generationJobRetention.compareTo(webhookRetention) < 0
+                || artifactStores.retention() == null
+                || artifactStores.retention().compareTo(generationJobRetention) < 0) {
+            throw new IllegalArgumentException("MCP HTTP persistence and retention configuration is invalid");
         }
         this.config = config;
         this.authenticator = authenticator;
         this.clock = clock;
         this.serviceStartedAt = clock.instant();
         this.auditLog = auditLog == null ? AuditLog.noop() : auditLog;
+        this.jobRepositories = jobRepositories;
+        this.generationJobRetention = generationJobRetention;
+        this.webhookRetention = webhookRetention;
         if (config.getWebhookConfigPath() == null) {
             this.webhookDeliveries = null;
             this.webhookDispatcher = null;
             this.tenants = new TenantApplicationRegistry(config.getDataRoot(),
                     new cn.bugstack.application.generation.NoopGenerationEventPublisher(), jobRepositories,
-                    artifactStores, quotaPolicy);
+                    artifactStores, quotaPolicy, aiClient, generationJobRetention);
         } else {
             WebhookEndpointRegistry endpoints = new JsonFileWebhookEndpointRegistry(
                     config.getWebhookConfigPath());
@@ -221,12 +302,15 @@ public final class McpHttpServer implements AutoCloseable {
             WebhookOutboxPublisher publisher = new WebhookOutboxPublisher(endpoints, webhookDeliveries);
             this.webhookDispatcher = new WebhookDispatcher(endpoints, webhookDeliveries);
             this.tenants = new TenantApplicationRegistry(config.getDataRoot(), publisher, jobRepositories,
-                    artifactStores, quotaPolicy);
+                    artifactStores, quotaPolicy, aiClient, generationJobRetention);
         }
         this.rateLimiter = new IdentityRateLimiter(config.getRequestsPerMinute(), clock);
         this.concurrency = new Semaphore(config.getMaxConcurrentRequests());
-        this.httpExecutor = Executors.newFixedThreadPool(config.getMaxConcurrentRequests());
-        this.operationExecutor = Executors.newFixedThreadPool(config.getMaxConcurrentRequests());
+        int workers = config.getMaxConcurrentRequests();
+        this.httpExecutor = BoundedExecutors.fixed(workers, workers * 32,
+                "omni-http", new ThreadPoolExecutor.CallerRunsPolicy());
+        this.operationExecutor = BoundedExecutors.fixed(workers, workers * 4,
+                "omni-operation", new ThreadPoolExecutor.AbortPolicy());
         this.maintenanceExecutor = Executors.newSingleThreadScheduledExecutor();
         try {
             this.server = HttpServer.create(config.getAddress(), 0);
@@ -258,12 +342,27 @@ public final class McpHttpServer implements AutoCloseable {
 
     /** 启动 HTTP、Webhook 投递和工件维护任务。 */
     public void start() {
+        tenants.recoverPersistedGenerationJobs(clock.instant());
         if (webhookDispatcher != null) webhookDispatcher.start();
         server.start();
         maintenanceExecutor.scheduleAtFixedRate(() -> {
             artifactCleanupRunsTotal.incrementAndGet();
             try { artifactsPurgedTotal.addAndGet(tenants.purgeExpiredArtifacts(clock.instant())); }
             catch (RuntimeException ignored) { artifactCleanupErrorsTotal.incrementAndGet(); }
+        }, 1, 1, TimeUnit.HOURS);
+        maintenanceExecutor.scheduleAtFixedRate(() -> {
+            try {
+                Instant now = clock.instant();
+                tenants.expirePendingReviews(now);
+                if (webhookDeliveries != null) {
+                    webhookDeliveriesPurgedTotal.addAndGet(
+                            webhookDeliveries.purgeTerminalBefore(now.minus(webhookRetention), 1_000));
+                }
+                generationJobsPurgedTotal.addAndGet(
+                        jobRepositories.purgeTerminalBefore(now.minus(generationJobRetention), 1_000));
+            } catch (RuntimeException ignored) {
+                lifecycleCleanupErrorsTotal.incrementAndGet();
+            }
         }, 1, 1, TimeUnit.HOURS);
     }
 
@@ -348,7 +447,8 @@ public final class McpHttpServer implements AutoCloseable {
             }
             ExternalDocumentToolApplication application = tenants.require(identity.getTenantId());
             session = new Session(UUID.randomUUID().toString(), identity,
-                    new McpJsonRpcServer(application, true), clock.instant());
+                    new McpJsonRpcServer(application, true, identity.getPrincipalId(),
+                            identity.hasScope("artifacts:read:any")), clock.instant());
         } else {
             session = requireSession(exchange, identity);
             if (session == null || !validProtocolHeader(exchange, session)) {
@@ -369,6 +469,10 @@ public final class McpHttpServer implements AutoCloseable {
             if (future != null) future.cancel(true);
             if (initialize) session.server.close();
             sendText(exchange, 504, "MCP operation timed out");
+            return;
+        } catch (RejectedExecutionException e) {
+            if (initialize) session.server.close();
+            sendText(exchange, 503, "MCP operation queue is full");
             return;
         } catch (InterruptedException e) {
             if (future != null) future.cancel(true);
@@ -453,7 +557,7 @@ public final class McpHttpServer implements AutoCloseable {
             sendText(exchange, 403, "invalid Origin");
             return;
         }
-        RequestIdentity identity = authenticate(exchange, "artifacts:read");
+        RequestIdentity identity = authenticateAny(exchange, "artifacts:read", "artifacts:read:any");
         if (identity == null) {
             return;
         }
@@ -472,7 +576,8 @@ public final class McpHttpServer implements AutoCloseable {
         }
         try {
             ResolvedExternalArtifact artifact = tenants.require(identity.getTenantId())
-                    .readResource("omni-office://artifacts/" + id);
+                    .readResource("omni-office://artifacts/" + id, identity.getPrincipalId(),
+                            identity.hasScope("artifacts:read:any"));
             Headers headers = exchange.getResponseHeaders();
             headers.set("Content-Type", artifact.getReference().getMediaType());
             headers.set("Content-Length", Long.toString(artifact.getReference().getSize()));
@@ -518,25 +623,42 @@ public final class McpHttpServer implements AutoCloseable {
                 return;
             }
             if (segments.length == 1 && "GET".equals(exchange.getRequestMethod())) {
-                RequestIdentity identity = authenticate(exchange, "generation:read");
+                RequestIdentity identity = authenticateAny(exchange, "generation:read", "generation:read:any");
                 if (identity == null) return;
-                sendJson(exchange, 200, jobNode(requireGeneration(identity).get(jobId)));
+                sendJson(exchange, 200, jobNode(requireGeneration(identity).get(jobId,
+                        identity.getPrincipalId(), identity.hasScope("generation:read:any"))));
                 audit(identity, "generation.get", "SUCCESS");
                 return;
             }
             if (segments.length == 2 && "cancel".equals(segments[1])
                     && "POST".equals(exchange.getRequestMethod())) {
-                RequestIdentity identity = authenticate(exchange, "generation:cancel");
+                RequestIdentity identity = authenticateAny(exchange, "generation:cancel", "generation:cancel:any");
                 if (identity == null) return;
-                sendJson(exchange, 200, jobNode(requireGeneration(identity).cancel(jobId)));
+                sendJson(exchange, 200, jobNode(requireGeneration(identity).cancel(jobId,
+                        identity.getPrincipalId(), identity.hasScope("generation:cancel:any"))));
                 audit(identity, "generation.cancel", "SUCCESS");
+                return;
+            }
+            if (segments.length == 2 && ("approve".equals(segments[1]) || "reject".equals(segments[1]))
+                    && "POST".equals(exchange.getRequestMethod())) {
+                RequestIdentity identity = authenticate(exchange, "ai:review");
+                if (identity == null || !allow(identity, exchange)) return;
+                JsonNode body = readJsonBody(exchange);
+                if (body == null) return;
+                String comment = reviewComment(body);
+                GenerationJobRecord job = "approve".equals(segments[1])
+                        ? requireGeneration(identity).approveReview(jobId, identity.getPrincipalId(), comment)
+                        : requireGeneration(identity).rejectReview(jobId, identity.getPrincipalId(), comment);
+                sendJson(exchange, 200, jobNode(job));
+                audit(identity, "generation.review." + segments[1], "SUCCESS");
                 return;
             }
             if (segments.length == 2 && "artifacts".equals(segments[1])
                     && "GET".equals(exchange.getRequestMethod())) {
-                RequestIdentity identity = authenticate(exchange, "generation:read");
+                RequestIdentity identity = authenticateAny(exchange, "generation:read", "generation:read:any");
                 if (identity == null) return;
-                GenerationJobRecord job = requireGeneration(identity).get(jobId);
+                GenerationJobRecord job = requireGeneration(identity).get(jobId,
+                        identity.getPrincipalId(), identity.hasScope("generation:read:any"));
                 ObjectNode result = mapper.createObjectNode();
                 result.put("jobId", job.getJobId());
                 ArrayNode artifacts = result.putArray("artifacts");
@@ -547,6 +669,10 @@ public final class McpHttpServer implements AutoCloseable {
             }
             exchange.getResponseHeaders().set("Allow", "GET, POST");
             sendText(exchange, 405, "method not allowed");
+        } catch (PayloadTooLargeException e) {
+            sendText(exchange, 413, "request body is too large");
+        } catch (JsonProcessingException e) {
+            sendProblem(exchange, 400, "INVALID_JSON", "request body is not valid JSON");
         } catch (GenerationJobConflictException e) {
             sendProblem(exchange, 409, "GENERATION_JOB_CONFLICT", e.getMessage());
         } catch (GenerationQuotaExceededException e) {
@@ -561,7 +687,12 @@ public final class McpHttpServer implements AutoCloseable {
                 sendProblem(exchange, 400, "INVALID_GENERATION_REQUEST", safeMessage(e));
             }
         } catch (RuntimeException e) {
-            sendProblem(exchange, 500, "GENERATION_SERVICE_ERROR", "generation service failed");
+            if (e.getMessage() != null && e.getMessage().contains("internal AI generation is not configured")) {
+                sendProblem(exchange, 503, "AI_GENERATION_NOT_CONFIGURED",
+                        "internal AI generation is not configured");
+            } else {
+                sendProblem(exchange, 500, "GENERATION_SERVICE_ERROR", "generation service failed");
+            }
         }
     }
 
@@ -581,6 +712,11 @@ public final class McpHttpServer implements AutoCloseable {
                 return;
             }
             if (request == null) return;
+            String mode = request.path("mode").asText();
+            if (mode.startsWith("AI_") && !identity.hasScope("ai:generate")) {
+                sendText(exchange, 403, "insufficient scope: ai:generate");
+                return;
+            }
             GenerationJobRecord job = requireGeneration(identity).submit(identity.getPrincipalId(),
                     exchange.getRequestHeaders().getFirst("X-Correlation-Id"),
                     exchange.getRequestHeaders().getFirst("Idempotency-Key"), request);
@@ -590,14 +726,16 @@ public final class McpHttpServer implements AutoCloseable {
             return;
         }
         if ("GET".equals(exchange.getRequestMethod())) {
-            RequestIdentity identity = authenticate(exchange, "generation:read");
+            RequestIdentity identity = authenticateAny(exchange, "generation:read", "generation:read:any");
             if (identity == null || !allow(identity, exchange)) return;
             int limit = queryLimit(exchange.getRequestURI().getRawQuery());
             String statusValue = queryValue(exchange.getRequestURI().getRawQuery(), "status");
             GenerationJobStatus status = statusValue == null || statusValue.isBlank() ? null
                     : GenerationJobStatus.valueOf(statusValue);
             String cursor = queryValue(exchange.getRequestURI().getRawQuery(), "cursor");
-            GenerationJobPage page = requireGeneration(identity).list(status, cursor, limit);
+            GenerationJobPage page = identity.hasScope("generation:read:any")
+                    ? requireGeneration(identity).list(status, cursor, limit)
+                    : requireGeneration(identity).listForPrincipal(identity.getPrincipalId(), status, cursor, limit);
             ArrayNode jobs = mapper.createArrayNode();
             page.getJobs().forEach(item -> jobs.add(jobNode(item)));
             ObjectNode result = mapper.createObjectNode();
@@ -635,10 +773,12 @@ public final class McpHttpServer implements AutoCloseable {
         try {
             JsonNode document = readJsonBody(exchange);
             if (document == null) return;
-            tenants.require(identity.getTenantId()).validateDocument(document);
+            cn.bugstack.application.document.DocumentCostEstimate estimate =
+                    tenants.require(identity.getTenantId()).estimateDocument(document);
             ObjectNode result = mapper.createObjectNode();
             result.put("valid", true);
             result.put("schemaVersion", document.path("schemaVersion").asText());
+            result.set("estimate", mapper.valueToTree(estimate));
             sendJson(exchange, 200, result);
             audit(identity, "document.validate", "SUCCESS");
         } catch (PayloadTooLargeException e) {
@@ -823,10 +963,11 @@ public final class McpHttpServer implements AutoCloseable {
         } else {
             JsonNode body = readJsonBody(exchange);
             if (body == null) return;
-            String comment = optionalComment(body);
+            String comment = optionalComment(body, "approve".equals(action));
             switch (action) {
                 case "approve":
-                    result = management.approve(templateId, version, identity.getPrincipalId(), comment);
+                    result = management.approve(templateId, version, identity.getPrincipalId(), comment,
+                            body.path("sampleData"));
                     break;
                 case "reject":
                     result = management.reject(templateId, version, identity.getPrincipalId(), comment);
@@ -851,17 +992,33 @@ public final class McpHttpServer implements AutoCloseable {
         return mapper.valueToTree(revision);
     }
 
-    private String optionalComment(JsonNode body) {
+    private String optionalComment(JsonNode body, boolean allowSampleData) {
         if (!body.isObject()) throw new IllegalArgumentException("template action body must be an object");
         java.util.Iterator<String> fields = body.fieldNames();
         while (fields.hasNext()) {
-            if (!"comment".equals(fields.next())) {
+            String field = fields.next();
+            if (!"comment".equals(field) && !(allowSampleData && "sampleData".equals(field))) {
                 throw new IllegalArgumentException("template action body contains an unexpected field");
             }
         }
         if (!body.has("comment") || body.path("comment").isNull()) return null;
         if (!body.path("comment").isTextual()) {
             throw new IllegalArgumentException("template action comment must be text");
+        }
+        return body.path("comment").asText();
+    }
+
+    private String reviewComment(JsonNode body) {
+        if (!body.isObject()) throw new IllegalArgumentException("AI review body must be an object");
+        java.util.Iterator<String> fields = body.fieldNames();
+        while (fields.hasNext()) {
+            if (!"comment".equals(fields.next())) {
+                throw new IllegalArgumentException("AI review body contains an unexpected field");
+            }
+        }
+        if (!body.has("comment") || body.path("comment").isNull()) return null;
+        if (!body.path("comment").isTextual()) {
+            throw new IllegalArgumentException("AI review comment must be text");
         }
         return body.path("comment").asText();
     }
@@ -877,22 +1034,41 @@ public final class McpHttpServer implements AutoCloseable {
 
     private void handleWebhookDeliveries(HttpExchange exchange) throws IOException {
         requestsTotal.incrementAndGet();
-        if (!"GET".equals(exchange.getRequestMethod())) {
-            exchange.getResponseHeaders().set("Allow", "GET");
-            sendText(exchange, 405, "method not allowed");
-            return;
-        }
         if (!validOrigin(exchange)) {
             sendText(exchange, 403, "invalid Origin");
             return;
         }
-        RequestIdentity identity = authenticate(exchange, "webhook:read");
-        if (identity == null || !allow(identity, exchange)) return;
         if (webhookDeliveries == null) {
             sendProblem(exchange, 404, "WEBHOOK_NOT_CONFIGURED", "webhook delivery is not configured");
             return;
         }
         try {
+            String base = "/v1/webhook-deliveries";
+            String path = exchange.getRequestURI().getPath();
+            String suffix = path.length() <= base.length() ? "" : path.substring(base.length());
+            if (!suffix.isEmpty() && !"/".equals(suffix)) {
+                String[] segments = suffix.substring(1).split("/");
+                if (segments.length == 2 && "redrive".equals(segments[1])
+                        && "POST".equals(exchange.getRequestMethod())) {
+                    RequestIdentity identity = authenticate(exchange, "webhook:redrive");
+                    if (identity == null || !allow(identity, exchange)) return;
+                    String eventId = UUID.fromString(segments[0]).toString();
+                    WebhookDeliveryRecord redriven = webhookDeliveries.redrive(
+                            identity.getTenantId(), eventId, clock.instant(), 5);
+                    sendJson(exchange, 200, webhookDeliveryNode(redriven));
+                    audit(identity, "webhook.delivery.redrive", "SUCCESS");
+                    return;
+                }
+                sendText(exchange, 404, "webhook delivery endpoint not found");
+                return;
+            }
+            if (!"GET".equals(exchange.getRequestMethod())) {
+                exchange.getResponseHeaders().set("Allow", "GET");
+                sendText(exchange, 405, "method not allowed");
+                return;
+            }
+            RequestIdentity identity = authenticate(exchange, "webhook:read");
+            if (identity == null || !allow(identity, exchange)) return;
             int limit = queryLimit(exchange.getRequestURI().getRawQuery());
             ObjectNode result = mapper.createObjectNode();
             ArrayNode deliveries = result.putArray("deliveries");
@@ -903,6 +1079,8 @@ public final class McpHttpServer implements AutoCloseable {
             audit(identity, "webhook.deliveries.list", "SUCCESS");
         } catch (IllegalArgumentException e) {
             sendProblem(exchange, 400, "INVALID_WEBHOOK_QUERY", safeMessage(e));
+        } catch (IllegalStateException e) {
+            sendProblem(exchange, 409, "WEBHOOK_REDRIVE_CONFLICT", safeMessage(e));
         }
     }
 
@@ -967,18 +1145,22 @@ public final class McpHttpServer implements AutoCloseable {
         value.put("correlationId", job.getCorrelationId());
         value.put("mode", job.getMode().name());
         value.put("status", job.getStatus().name());
+        if (job.getCurrentStage() != null) value.put("currentStage", job.getCurrentStage().name());
         value.put("attemptCount", job.getAttemptCount());
         value.put("maxAttempts", job.getMaxAttempts());
         if (job.getRequest() != null && job.getRequest().has("webhookId")) {
             value.put("webhookId", job.getRequest().path("webhookId").asText());
         }
         if (job.getTerminalEventId() != null) value.put("terminalEventId", job.getTerminalEventId());
+        if (job.getDraftId() != null) value.put("draftId", job.getDraftId());
         if (job.getTerminalEventQueuedAt() != null) {
             value.put("terminalEventQueuedAt", job.getTerminalEventQueuedAt().toString());
         }
         value.put("createdAt", job.getCreatedAt().toString());
         value.put("updatedAt", job.getUpdatedAt().toString());
         if (job.getStartedAt() != null) value.put("startedAt", job.getStartedAt().toString());
+        if (job.getStageStartedAt() != null) value.put("stageStartedAt", job.getStageStartedAt().toString());
+        if (job.getDeadlineAt() != null) value.put("deadlineAt", job.getDeadlineAt().toString());
         if (job.getCompletedAt() != null) value.put("completedAt", job.getCompletedAt().toString());
         if (job.getErrorCode() != null) value.put("errorCode", job.getErrorCode());
         if (job.getErrorMessage() != null) value.put("errorMessage", job.getErrorMessage());
@@ -1114,8 +1296,11 @@ public final class McpHttpServer implements AutoCloseable {
         value.put("resource", config.getResourceIdentifier().toString());
         value.putArray("authorization_servers").add(config.getAuthorizationServer().toString());
         value.putArray("scopes_supported").add("mcp:invoke").add("artifacts:read")
-                .add("generation:create").add("generation:read").add("generation:cancel")
-                .add("webhook:read").add("templates:read").add("templates:write")
+                .add("artifacts:read:any").add("generation:create").add("generation:read")
+                .add("generation:read:any").add("generation:cancel").add("generation:cancel:any")
+                .add("ai:generate")
+                .add("webhook:read").add("webhook:redrive")
+                .add("templates:read").add("templates:write")
                 .add("templates:review").add("operations:read");
         sendJson(exchange, 200, value);
     }
@@ -1127,12 +1312,23 @@ public final class McpHttpServer implements AutoCloseable {
     }
 
     private RequestIdentity authenticate(HttpExchange exchange, String scope) throws IOException {
+        return authenticateAny(exchange, scope);
+    }
+
+    private RequestIdentity authenticateAny(HttpExchange exchange, String... scopes) throws IOException {
         try {
             RequestIdentity identity = authenticator.authenticate(new HttpAuthenticationRequest(
                     exchange.getRequestHeaders().getFirst("Authorization"),
                     exchange.getRequestHeaders().getFirst("X-API-Key")));
-            if (!identity.hasScope(scope)) {
-                sendText(exchange, 403, "insufficient scope: " + scope);
+            boolean allowed = false;
+            for (String scope : scopes) {
+                if (identity.hasScope(scope)) {
+                    allowed = true;
+                    break;
+                }
+            }
+            if (!allowed) {
+                sendText(exchange, 403, "insufficient scope: " + String.join(" or ", scopes));
                 return null;
             }
             return identity;
@@ -1241,6 +1437,14 @@ public final class McpHttpServer implements AutoCloseable {
                 + "omni_office_artifact_downloads_total " + downloadsTotal.get() + "\n"
                 + "# TYPE omni_office_mcp_sessions gauge\n"
                 + "omni_office_mcp_sessions " + sessions.size() + "\n"
+                + "# TYPE omni_office_http_executor_queue_size gauge\n"
+                + "omni_office_http_executor_queue_size " + httpExecutor.getQueue().size() + "\n"
+                + "# TYPE omni_office_operation_executor_queue_size gauge\n"
+                + "omni_office_operation_executor_queue_size " + operationExecutor.getQueue().size() + "\n"
+                + "# TYPE omni_office_generation_worker_queue_size gauge\n"
+                + "omni_office_generation_worker_queue_size " + tenants.generationWorkerQueueSize() + "\n"
+                + "# TYPE omni_office_generation_workers_active gauge\n"
+                + "omni_office_generation_workers_active " + tenants.generationWorkersActive() + "\n"
                 + "# TYPE omni_office_uptime_seconds gauge\n"
                 + "omni_office_uptime_seconds "
                 + Math.max(0L, Duration.between(serviceStartedAt, clock.instant()).getSeconds()) + "\n"
@@ -1251,6 +1455,12 @@ public final class McpHttpServer implements AutoCloseable {
                 + "omni_office_artifact_cleanup_errors_total " + artifactCleanupErrorsTotal.get() + "\n"
                 + "# TYPE omni_office_artifacts_purged_total counter\n"
                 + "omni_office_artifacts_purged_total " + artifactsPurgedTotal.get() + "\n"
+                + "# TYPE omni_office_generation_jobs_purged_total counter\n"
+                + "omni_office_generation_jobs_purged_total " + generationJobsPurgedTotal.get() + "\n"
+                + "# TYPE omni_office_webhook_deliveries_purged_total counter\n"
+                + "omni_office_webhook_deliveries_purged_total " + webhookDeliveriesPurgedTotal.get() + "\n"
+                + "# TYPE omni_office_lifecycle_cleanup_errors_total counter\n"
+                + "omni_office_lifecycle_cleanup_errors_total " + lifecycleCleanupErrorsTotal.get() + "\n"
                 + jobs + webhookMetrics;
         byte[] content = value.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");

@@ -53,6 +53,7 @@ public final class CustomAssessmentStyleProfile implements StyleProfile {
         TableStyle table = new TableStyle("TableHeader");
         table.setBordered(true);
         table.setHeaderBold(true);
+        table.setRepeatHeaderRow(true);
         registry.registerTableStyle(table);
         return registry;
     }

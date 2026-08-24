@@ -11,6 +11,8 @@ public class ReportListItem implements ReportElement {
     private final String text;
     /** 列表项段落样式名称。 */
     private String styleName;
+    /** 可选字体颜色，格式为 {@code #RRGGBB}。 */
+    private String fontColor;
 
     /**
      * 创建列表项。
@@ -70,5 +72,13 @@ public class ReportListItem implements ReportElement {
      */
     public void setStyleName(String styleName) {
         this.styleName = styleName;
+    }
+
+    public String getFontColor() {
+        return fontColor;
+    }
+
+    public void setFontColor(String fontColor) {
+        this.fontColor = fontColor;
     }
 }

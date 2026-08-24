@@ -37,6 +37,24 @@
       "effect": "CREATE_ARTIFACT",
       "input": "DiagramSpec@1.0",
       "output": "diagramArtifactId plus VSDX and PNG resource references"
+    },
+    {
+      "name": "omni_asset_store",
+      "effect": "CREATE_ARTIFACT",
+      "input": "base64 PNG or JPEG",
+      "output": "principal-owned managed assetId"
+    },
+    {
+      "name": "omni_asset_get",
+      "effect": "READ_ONLY",
+      "requires": ["assetId"],
+      "output": "managed image metadata"
+    },
+    {
+      "name": "omni_asset_delete",
+      "effect": "DELETE_ARTIFACT",
+      "requires": ["assetId"],
+      "output": "deletion result"
     }
   ],
   "artifactBoundary": {

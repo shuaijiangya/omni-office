@@ -19,6 +19,10 @@
   },
   "authentication": ["api-key", "jwt-hs256", "oidc-discovery-jwks-rs256"],
   "isolation": ["tenant-artifacts", "identity-sessions", "identity-tasks"],
+  "authorization": {
+    "principalPrivateByDefault": true,
+    "tenantAdminScopes": ["generation:read:any", "generation:cancel:any", "artifacts:read:any"]
+  },
   "outputFormats": ["DOCX", "PDF", "HTML"],
   "operations": [
     "tools/list", "tools/call", "resources/read",
@@ -26,14 +30,23 @@
   ],
   "operationsEndpoints": [
     "/health/live", "/health/ready", "/metrics", "/artifacts/{artifactId}",
-    "/v1/generation-jobs", "/v1/document-specs/validate",
+    "/v1/generation-jobs", "/v1/generation-jobs/{jobId}/approve", "/v1/generation-jobs/{jobId}/reject", "/v1/document-specs/validate",
     "/v1/templates/{templateId}/versions/{version}/validate-data",
     "/v1/admin/templates", "/v1/admin/operations/summary",
-    "/v1/webhook-deliveries", "/v1/openapi.json"
+    "/v1/webhook-deliveries", "/v1/webhook-deliveries/{eventId}/redrive", "/v1/openapi.json"
   ],
   "generationJob": {
-    "modes": ["TEMPLATE_DATA", "DOCUMENT_SPEC"],
-    "statuses": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"],
+    "modes": ["TEMPLATE_DATA", "DOCUMENT_SPEC", "AI_FREEFORM", "AI_TEMPLATE"],
+    "internalAi": {
+      "optional": true,
+      "scope": "ai:generate",
+      "provider": "ollama",
+      "structuredOutputValidation": true,
+      "reviewPolicies": ["AUTO", "REQUIRED"],
+      "reviewScope": "ai:review",
+      "defaultJobAttempts": 1
+    },
+    "statuses": ["QUEUED", "RUNNING", "PENDING_REVIEW", "SUCCEEDED", "FAILED", "CANCELLED"],
     "developmentRepository": "atomic-file",
     "productionRepository": "postgresql",
     "multiInstanceClaim": "lease-and-skip-locked",
@@ -52,13 +65,17 @@
     "deliverySemantics": "at-least-once",
     "signature": "HMAC-SHA256",
     "retryableStatuses": [408, 429, "5xx"],
-    "auditEndpoint": "/v1/webhook-deliveries"
+    "auditEndpoint": "/v1/webhook-deliveries",
+    "deadLetterRedrive": "/v1/webhook-deliveries/{eventId}/redrive",
+    "terminalRetention": true
   },
   "artifactStorage": {
     "development": "tenant-local-file",
     "production": "s3-compatible",
     "tenantPrefixIsolation": true,
-    "controlledResourceUri": true
+    "controlledResourceUri": true,
+    "managedImageAssetTools": ["omni_asset_store", "omni_asset_get", "omni_asset_delete"],
+    "streamingFilePublication": true
   },
   "oauthProtectedResourceMetadata": {
     "endpoint": "/.well-known/oauth-protected-resource",
@@ -69,6 +86,7 @@
     "endpoint": "/v1/admin/templates",
     "statuses": ["DRAFT", "IN_REVIEW", "PUBLISHED", "REJECTED", "RETIRED"],
     "fourEyesApproval": true,
+    "sampleRenderGate": true,
     "schemaComparison": true
   },
   "javaSdk": ["generation-jobs", "polling", "artifacts", "template-management"],

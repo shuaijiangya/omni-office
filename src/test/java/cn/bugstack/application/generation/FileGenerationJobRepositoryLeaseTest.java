@@ -69,6 +69,25 @@ class FileGenerationJobRepositoryLeaseTest {
         assertEquals("worker-b", exhausted.getLeaseOwner());
     }
 
+    @Test
+    void aggregatesStatusesAndPurgesOnlyOldTerminalJobs() throws Exception {
+        FileGenerationJobRepository repository = new FileGenerationJobRepository(
+                Files.createTempDirectory("generation-retention"));
+        Instant old = Instant.parse("2026-06-01T00:00:00Z");
+        GenerationJobRecord completed = record(old);
+        completed.setStatus(GenerationJobStatus.SUCCEEDED);
+        completed.setCompletedAt(old.plusSeconds(10));
+        completed.setUpdatedAt(old.plusSeconds(10));
+        repository.create(completed);
+        GenerationJobRecord queued = repository.create(record(old.plusSeconds(20)));
+
+        assertEquals(1L, repository.countsByStatus().get(GenerationJobStatus.SUCCEEDED));
+        assertEquals(1L, repository.countsByStatus().get(GenerationJobStatus.QUEUED));
+        assertEquals(1, repository.purgeTerminalBefore(old.plusSeconds(11), 10));
+        assertFalse(repository.find(completed.getJobId()).isPresent());
+        assertTrue(repository.find(queued.getJobId()).isPresent());
+    }
+
     private GenerationJobRecord record(Instant now) {
         GenerationJobRecord value = new GenerationJobRecord();
         value.setJobId(UUID.randomUUID().toString());

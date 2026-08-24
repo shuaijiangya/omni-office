@@ -8,10 +8,15 @@
   "layout": {
     "styleProfile": "GJB_438C",
     "headingNumberingEnabled": true,
-    "bodyTitleEnabled": true,
+    "bodyTitleEnabled": false,
     "tableOfContentsDepth": 3,
     "pageNumberFooterEnabled": true,
     "bodyPageNumberStart": 1
+  },
+  "cover": {
+    "documentName": "系统评估报告",
+    "projectName": "系统综合评估",
+    "version": "V1.0"
   },
   "sections": [
     {

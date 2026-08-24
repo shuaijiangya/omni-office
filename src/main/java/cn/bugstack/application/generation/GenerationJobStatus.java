@@ -4,6 +4,7 @@ package cn.bugstack.application.generation;
 public enum GenerationJobStatus {
     QUEUED,
     RUNNING,
+    PENDING_REVIEW,
     SUCCEEDED,
     FAILED,
     CANCELLED;

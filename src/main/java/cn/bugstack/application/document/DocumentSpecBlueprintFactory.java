@@ -6,6 +6,8 @@ import cn.bugstack.export.definition.ReportStyleProfile;
 import cn.bugstack.protocol.document.DocumentLayoutSpec;
 import cn.bugstack.protocol.document.DocumentSpec;
 import cn.bugstack.protocol.document.DocumentStyleProfile;
+import cn.bugstack.office.docx.model.DocxPageOrientation;
+import cn.bugstack.office.docx.model.DocxPaperSize;
 
 /**
  * 将 DocumentSpec 的公开版式选项转换为现有报告蓝图。
@@ -22,7 +24,11 @@ public final class DocumentSpecBlueprintFactory {
                 .headingNumberingEnabled(source.isHeadingNumberingEnabled())
                 .bodyTitle(source.isBodyTitleEnabled())
                 .pageNumberFooter(source.isPageNumberFooterEnabled())
-                .modulePageNumberStart(source.getBodyPageNumberStart());
+                .modulePageNumberStart(source.getBodyPageNumberStart())
+                .pageSetup(DocxPaperSize.valueOf(source.getPaperSize()),
+                        DocxPageOrientation.valueOf(source.getOrientation()),
+                        source.getTopMarginPoints(), source.getRightMarginPoints(),
+                        source.getBottomMarginPoints(), source.getLeftMarginPoints());
         if (source.getTableOfContentsDepth() != null) {
             layout.tableOfContents(source.getTableOfContentsDepth());
         }
@@ -32,6 +38,13 @@ public final class DocumentSpecBlueprintFactory {
         if (hasText(source.getFooterText())) {
             layout.footer(source.getFooterText());
         }
+        if (spec.getCover() != null) {
+            layout.cover(spec.getCover().getDocumentName(), spec.getCover().getProjectName(),
+                    spec.getCover().getVersion());
+        }
+        spec.getRevisionHistory().forEach(item -> layout.revision(
+                item.getVersion(), item.getDate(), item.getDescription(), item.getAuthor()));
+        spec.getApprovals().forEach(item -> layout.approval(item.getRole(), item.getPerson(), item.getDate()));
         return ReportBlueprint.builder("dynamic-document", "Dynamic Document", spec.getSchemaVersion())
                 .title(spec.getMetadata().getTitle())
                 .metadata(spec.getMetadata().getAuthor(), spec.getMetadata().getSubject())

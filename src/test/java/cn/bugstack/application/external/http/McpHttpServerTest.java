@@ -3,6 +3,8 @@ package cn.bugstack.application.external.http;
 import cn.bugstack.application.external.ExternalDocumentToolApplication;
 import cn.bugstack.application.external.security.RequestIdentity;
 import cn.bugstack.application.external.security.StaticApiKeyAuthenticator;
+import cn.bugstack.application.external.security.HttpAuthenticationRequest;
+import cn.bugstack.application.external.security.HttpAuthenticator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -130,6 +132,26 @@ class McpHttpServerTest {
                     .contains("resource_metadata=\"https://documents.example.com/"
                             + ".well-known/oauth-protected-resource\""));
         }
+    }
+
+    @Test
+    void apiKeyConfigurationUsesLeastPrivilegeDefaultsAndExplicitScopes() {
+        HttpAuthenticator authenticator = McpHttpServerMain.apiKeyAuthenticator(
+                "developer-key=tenant-a:alice,admin-key-1=tenant-a:admin:*"
+                        + ",reader-key=tenant-a:bob:generation:read|artifacts:read");
+
+        RequestIdentity developer = authenticator.authenticate(
+                new HttpAuthenticationRequest(null, "developer-key"));
+        assertTrue(developer.hasScope("generation:create"));
+        assertTrue(developer.hasScope("artifacts:read"));
+        assertFalse(developer.hasScope("templates:review"));
+        assertFalse(developer.hasScope("generation:read:any"));
+
+        RequestIdentity admin = authenticator.authenticate(new HttpAuthenticationRequest(null, "admin-key-1"));
+        assertTrue(admin.hasScope("templates:review"));
+        RequestIdentity reader = authenticator.authenticate(new HttpAuthenticationRequest(null, "reader-key"));
+        assertTrue(reader.hasScope("generation:read"));
+        assertFalse(reader.hasScope("generation:create"));
     }
 
     private RequestIdentity identity(String tenant, String principal) {

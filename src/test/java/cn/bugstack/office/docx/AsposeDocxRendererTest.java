@@ -4,6 +4,7 @@ import cn.bugstack.office.docx.api.DocxDocument;
 import cn.bugstack.office.docx.model.CaptionType;
 import cn.bugstack.office.docx.model.DocxPaperSize;
 import cn.bugstack.office.docx.model.TableCellVerticalAlignment;
+import cn.bugstack.office.docx.model.TableHorizontalAlignment;
 import cn.bugstack.office.docx.model.TableVerticalMerge;
 import com.aspose.words.Cell;
 import com.aspose.words.CellMerge;
@@ -18,15 +19,18 @@ import com.aspose.words.OutlineLevel;
 import com.aspose.words.Orientation;
 import com.aspose.words.Paragraph;
 import com.aspose.words.ParagraphAlignment;
+import com.aspose.words.PreferredWidthType;
 import com.aspose.words.Run;
 import com.aspose.words.Shape;
 import com.aspose.words.StyleIdentifier;
 import com.aspose.words.Table;
+import com.aspose.words.TableAlignment;
 import com.aspose.words.Underline;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.awt.Color;
 import java.util.Base64;
 import java.util.zip.ZipFile;
 
@@ -36,6 +40,53 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AsposeDocxRendererTest {
+
+    @Test
+    void adaptsTableToPageWidthAndCentersCellTextByDefault() throws Exception {
+        Path directory = Files.createTempDirectory("docx-responsive-table");
+        Path output = directory.resolve("responsive-table-standard-margin.docx");
+        Path narrowOutput = directory.resolve("responsive-table-wide-margin.docx");
+
+        createResponsiveTableDocument(output, 54D);
+        createResponsiveTableDocument(narrowOutput, 90D);
+
+        Document rendered = new Document(output.toString());
+        Document narrowRendered = new Document(narrowOutput.toString());
+        Table table = findTableContaining(rendered, "较窄列");
+        Table narrowTable = findTableContaining(narrowRendered, "较窄列");
+        double firstWidth = table.getFirstRow().getCells().get(0).getCellFormat().getWidth();
+        double secondWidth = table.getFirstRow().getCells().get(1).getCellFormat().getWidth();
+        double standardTableWidth = firstWidth + secondWidth;
+        double narrowTableWidth = rowWidth(narrowTable.getFirstRow());
+
+        assertFalse(table.getAllowAutoFit());
+        double availablePageWidth = rendered.getFirstSection().getPageSetup().getPageWidth()
+                - rendered.getFirstSection().getPageSetup().getLeftMargin()
+                - rendered.getFirstSection().getPageSetup().getRightMargin();
+        assertEquals(PreferredWidthType.POINTS, table.getPreferredWidth().getType());
+        assertEquals(availablePageWidth, table.getPreferredWidth().getValue(), 0.1D);
+        assertEquals(72D, standardTableWidth - narrowTableWidth, 1D);
+        assertEquals(2D, secondWidth / firstWidth, 0.05D);
+        assertEquals(CellVerticalAlignment.CENTER,
+                table.getFirstRow().getFirstCell().getCellFormat().getVerticalAlignment());
+        assertEquals(ParagraphAlignment.CENTER,
+                table.getFirstRow().getFirstCell().getFirstParagraph().getParagraphFormat().getAlignment());
+    }
+
+    /** 创建具有指定左右页边距的响应式表格文档。 */
+    private void createResponsiveTableDocument(Path output, double horizontalMargin) {
+        DocxDocument.create()
+                .pageSetup(setup -> setup
+                        .paper(DocxPaperSize.A4)
+                        .margins(72, horizontalMargin, 72, horizontalMargin))
+                .section()
+                .table()
+                .widths(1, 2)
+                .row("较窄列", "较宽列")
+                .end()
+                .end()
+                .save(output);
+    }
 
     @Test
     void rendersDocxWithTextTableImageAndVisioPreview() throws Exception {
@@ -447,6 +498,7 @@ class AsposeDocxRendererTest {
         String text = rendered.getText();
         Paragraph bullet = findParagraph(rendered, "支持前置页");
         Paragraph numbered = findParagraph(rendered, "按章节组织");
+        Table revisionTable = findTableContaining(rendered, "创建文档");
         Table mergedTable = findTableContaining(rendered, "跨两列");
         Cell firstCell = mergedTable.getFirstRow().getCells().get(0);
 
@@ -456,6 +508,17 @@ class AsposeDocxRendererTest {
         assertTrue(text.contains("引用图 1"));
         assertTrue(bullet.getListFormat().isListItem());
         assertTrue(numbered.getListFormat().isListItem());
+        assertTrue(revisionTable.getFirstRow().getRowFormat().getHeadingFormat());
+        assertFalse(revisionTable.getFirstRow().getFirstCell().getFirstParagraph()
+                .getRuns().get(0).getFont().getBold());
+        assertFalse(revisionTable.getRows().get(1).getFirstCell().getFirstParagraph()
+                .getRuns().get(0).getFont().getBold());
+        assertEquals(Color.BLACK, revisionTable.getFirstRow().getFirstCell().getFirstParagraph()
+                .getRuns().get(0).getFont().getColor());
+        assertEquals("黑体", revisionTable.getFirstRow().getFirstCell().getFirstParagraph()
+                .getRuns().get(0).getFont().getNameFarEast());
+        assertEquals(Color.BLACK, revisionTable.getRows().get(1).getFirstCell().getFirstParagraph()
+                .getRuns().get(0).getFont().getColor());
         assertEquals(2, mergedTable.getFirstRow().getCells().getCount());
         assertFalse(mergedTable.getAllowAutoFit());
     }
@@ -499,6 +562,37 @@ class AsposeDocxRendererTest {
         assertEquals(CellMerge.FIRST, firstCell.getCellFormat().getVerticalMerge());
         assertEquals(CellVerticalAlignment.CENTER, firstCell.getCellFormat().getVerticalAlignment());
         assertEquals(CellMerge.PREVIOUS, mergedCell.getCellFormat().getVerticalMerge());
+    }
+
+    @Test
+    void rendersRunColorCenteredTableAndRectangularMerge() throws Exception {
+        Path directory = Files.createTempDirectory("docx-formatting");
+        Path output = directory.resolve("formatting.docx");
+
+        DocxDocument.create()
+                .section()
+                .paragraph().text("彩色文本", "#C00000").text("继承颜色").end()
+                .table()
+                .alignment(TableHorizontalAlignment.CENTER)
+                .row(row -> row.cell(2, cell -> cell.verticalMerge(TableVerticalMerge.FIRST)
+                        .paragraph().text("矩形合并").end()))
+                .row(row -> row.cell(2, cell -> cell.verticalMerge(TableVerticalMerge.PREVIOUS)
+                        .paragraph().text("").end()))
+                .end()
+                .end()
+                .save(output);
+
+        Document rendered = new Document(output.toString());
+        Paragraph paragraph = findParagraph(rendered, "彩色文本");
+        Table table = findTableContaining(rendered, "矩形合并");
+
+        assertEquals(new Color(192, 0, 0), paragraph.getRuns().get(0).getFont().getColor());
+        assertFalse(new Color(192, 0, 0).equals(paragraph.getRuns().get(1).getFont().getColor()));
+        assertEquals(TableAlignment.CENTER, table.getAlignment());
+        assertEquals(CellMerge.FIRST,
+                table.getFirstRow().getFirstCell().getCellFormat().getVerticalMerge());
+        assertEquals(CellMerge.PREVIOUS,
+                table.getLastRow().getFirstCell().getCellFormat().getVerticalMerge());
     }
 
     /**
@@ -614,6 +708,15 @@ class AsposeDocxRendererTest {
             }
         }
         throw new AssertionError("table not found: " + text);
+    }
+
+    /** 计算指定表格行的总宽度。 */
+    private double rowWidth(com.aspose.words.Row row) throws Exception {
+        double width = 0D;
+        for (Cell cell : row.getCells()) {
+            width += cell.getCellFormat().getWidth();
+        }
+        return width;
     }
 
     /**

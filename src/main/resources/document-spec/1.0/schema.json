@@ -9,6 +9,13 @@
     "schemaVersion": { "const": "1.0" },
     "metadata": { "$ref": "#/$defs/metadata" },
     "layout": { "$ref": "#/$defs/layout" },
+    "cover": { "$ref": "#/$defs/cover" },
+    "revisionHistory": {
+      "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/revision" }
+    },
+    "approvals": {
+      "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/approval" }
+    },
     "sections": {
       "type": "array",
       "minItems": 1,
@@ -31,6 +38,13 @@
         "Heading6", "Heading7", "Heading8", "Heading9"
       ]
     },
+    "fontColor": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "captionPosition": {
+      "enum": ["ABOVE", "BELOW"]
+    },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -47,12 +61,49 @@
       "properties": {
         "styleProfile": { "enum": ["DEFAULT", "BUSINESS_BRIEF", "GJB_438C"] },
         "headingNumberingEnabled": { "type": "boolean" },
-        "bodyTitleEnabled": { "type": "boolean" },
+        "bodyTitleEnabled": {
+          "type": "boolean",
+          "description": "Whether to prepend the report title when no table of contents is configured. Ignored when tableOfContentsDepth is set so no framework-generated content is inserted before the caller-defined module body."
+        },
         "tableOfContentsDepth": { "type": ["integer", "null"], "minimum": 1, "maximum": 9 },
         "headerText": { "type": ["string", "null"], "maxLength": 20000 },
         "footerText": { "type": ["string", "null"], "maxLength": 20000 },
         "pageNumberFooterEnabled": { "type": "boolean" },
         "bodyPageNumberStart": { "type": "integer", "minimum": 1 }
+        ,"paperSize": { "enum": ["A4", "A3", "LETTER"] }
+        ,"orientation": { "enum": ["PORTRAIT", "LANDSCAPE"] }
+        ,"topMarginPoints": { "type": "number", "minimum": 0, "maximum": 288 }
+        ,"rightMarginPoints": { "type": "number", "minimum": 0, "maximum": 288 }
+        ,"bottomMarginPoints": { "type": "number", "minimum": 0, "maximum": 288 }
+        ,"leftMarginPoints": { "type": "number", "minimum": 0, "maximum": 288 }
+      }
+    },
+    "cover": {
+      "type": "object", "additionalProperties": false,
+      "required": ["documentName", "projectName", "version"],
+      "properties": {
+        "documentName": { "$ref": "#/$defs/nonBlankText" },
+        "projectName": { "$ref": "#/$defs/nonBlankText" },
+        "version": { "$ref": "#/$defs/nonBlankText" }
+      }
+    },
+    "revision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "date", "description", "author"],
+      "properties": {
+        "version": { "$ref": "#/$defs/nonBlankText" },
+        "date": { "$ref": "#/$defs/nonBlankText" },
+        "description": { "$ref": "#/$defs/nonBlankText" },
+        "author": { "$ref": "#/$defs/nonBlankText" }
+      }
+    },
+    "approval": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "person", "date"],
+      "properties": {
+        "role": { "$ref": "#/$defs/nonBlankText" },
+        "person": { "$ref": "#/$defs/nonBlankText" },
+        "date": { "$ref": "#/$defs/nonBlankText" }
       }
     },
     "section": {
@@ -82,11 +133,60 @@
     "paragraphBlock": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "text"],
+      "required": ["type"],
       "properties": {
         "type": { "const": "paragraph" },
         "text": { "$ref": "#/$defs/nonBlankText" },
-        "styleName": { "$ref": "#/$defs/styleName" }
+        "textRanges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/textRange" }
+        },
+        "styleName": { "$ref": "#/$defs/styleName" },
+        "fontColor": { "$ref": "#/$defs/fontColor" }
+      },
+      "oneOf": [
+        { "required": ["text"], "not": { "required": ["textRanges"] } },
+        { "required": ["textRanges"], "not": { "required": ["text"] } }
+      ]
+    },
+    "textRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": { "$ref": "#/$defs/nonBlankText" },
+        "style": { "$ref": "#/$defs/textRangeStyle" }
+      }
+    },
+    "textRangeStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fontFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": ".*\\S.*"
+        },
+        "asciiFontFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": ".*\\S.*"
+        },
+        "farEastFontFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": ".*\\S.*"
+        },
+        "fontSize": { "type": "number", "minimum": 1, "maximum": 200 },
+        "fontColor": { "$ref": "#/$defs/fontColor" },
+        "bold": { "type": "boolean" },
+        "italic": { "type": "boolean" },
+        "underline": { "type": "boolean" }
       }
     },
     "bulletListBlock": {
@@ -101,7 +201,8 @@
           "maxItems": 500,
           "items": { "$ref": "#/$defs/nonBlankText" }
         },
-        "styleName": { "$ref": "#/$defs/styleName" }
+        "styleName": { "$ref": "#/$defs/styleName" },
+        "fontColor": { "$ref": "#/$defs/fontColor" }
       }
     },
     "numberedListBlock": {
@@ -116,7 +217,19 @@
           "maxItems": 500,
           "items": { "$ref": "#/$defs/nonBlankText" }
         },
-        "styleName": { "$ref": "#/$defs/styleName" }
+        "styleName": { "$ref": "#/$defs/styleName" },
+        "fontColor": { "$ref": "#/$defs/fontColor" }
+      }
+    },
+    "tableMerge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startRow", "startColumn", "rowSpan", "columnSpan"],
+      "properties": {
+        "startRow": { "type": "integer", "minimum": 0 },
+        "startColumn": { "type": "integer", "minimum": 0 },
+        "rowSpan": { "type": "integer", "minimum": 1 },
+        "columnSpan": { "type": "integer", "minimum": 1 }
       }
     },
     "tableBlock": {
@@ -129,7 +242,7 @@
           "type": "array",
           "minItems": 1,
           "maxItems": 50,
-          "items": { "$ref": "#/$defs/nonBlankText" }
+          "items": { "type": "string", "maxLength": 20000 }
         },
         "rows": {
           "type": "array",
@@ -141,29 +254,45 @@
         },
         "columnWidths": {
           "type": "array",
+          "description": "Relative column-width weights. The table always fills the current page body width.",
           "items": { "type": "number", "exclusiveMinimum": 0 }
         },
         "styleName": { "enum": ["TableNormal", "TableHeader", "TableCell"] },
+        "fontColor": { "$ref": "#/$defs/fontColor" },
+        "headerTextStyle": { "$ref": "#/$defs/textRangeStyle" },
+        "bodyTextStyle": { "$ref": "#/$defs/textRangeStyle" },
+        "alignment": { "enum": ["LEFT", "CENTER", "RIGHT"] },
+        "merges": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/tableMerge" }
+        },
         "caption": { "type": "string", "maxLength": 20000 },
-        "captionAutoNumbered": { "type": "boolean" }
+        "captionAutoNumbered": { "type": "boolean" },
+        "captionPosition": { "$ref": "#/$defs/captionPosition" }
       }
     },
     "imageBlock": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "source"],
+      "required": ["type"],
       "properties": {
         "type": { "const": "image" },
         "source": { "$ref": "#/$defs/nonBlankText" },
+        "assetId": { "type": "string", "format": "uuid" },
         "alternativeText": { "type": "string", "maxLength": 20000 },
         "width": { "type": "integer", "minimum": 1 },
         "height": { "type": "integer", "minimum": 1 },
-        "caption": { "type": "string", "maxLength": 20000 }
+        "caption": { "type": "string", "maxLength": 20000 },
+        "captionPosition": { "$ref": "#/$defs/captionPosition" }
       },
       "dependentRequired": {
         "width": ["height"],
         "height": ["width"]
-      }
+      },
+      "oneOf": [
+        { "required": ["source"], "not": { "required": ["assetId"] } },
+        { "required": ["assetId"], "not": { "required": ["source"] } }
+      ]
     },
     "diagramBlock": {
       "type": "object",
@@ -175,6 +304,7 @@
         "definition": { "$ref": "https://omni-office.local/schemas/diagram-spec/1.0/schema.json" },
         "embedMode": { "enum": ["PREVIEW_IMAGE", "EDITABLE_VISIO"] },
         "caption": { "type": "string", "maxLength": 20000 },
+        "captionPosition": { "$ref": "#/$defs/captionPosition" },
         "maxWidthPoints": { "type": "number", "exclusiveMinimum": 0 },
         "maxHeightPoints": { "type": "number", "exclusiveMinimum": 0 }
       },

@@ -1,18 +1,22 @@
 package cn.bugstack.export.docx;
 
 import cn.bugstack.export.api.ReportOutputFormat;
+import cn.bugstack.export.context.ReportBasicInfo;
 import cn.bugstack.export.definition.ReportBlueprint;
 import cn.bugstack.export.definition.ReportLayout;
 import cn.bugstack.export.definition.ReportStyleProfile;
+import cn.bugstack.export.document.CaptionPosition;
 import cn.bugstack.export.document.ReportDocument;
 import cn.bugstack.export.document.ReportElement;
 import cn.bugstack.export.document.ReportElementType;
 import cn.bugstack.export.document.ReportSectionBuilder;
 import cn.bugstack.export.example.style.CustomAssessmentStyleProfile;
 import cn.bugstack.office.docx.api.DocxDocument;
+import cn.bugstack.office.docx.model.CaptionNode;
 import cn.bugstack.office.docx.model.DocxBlock;
 import cn.bugstack.office.docx.model.ParagraphNode;
 import cn.bugstack.office.docx.model.SectionNode;
+import cn.bugstack.office.docx.model.TableNode;
 import com.aspose.words.Document;
 import com.aspose.words.Field;
 import com.aspose.words.FieldType;
@@ -21,7 +25,9 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,6 +57,48 @@ class DocxReportCompilerTest {
                 .getParagraphStyle("BodyText").getFontSize());
         assertEquals(16.0, document.getStyleRegistry()
                 .getParagraphStyle("Heading1").getFontSize());
+    }
+
+    @Test
+    void doesNotInsertFrameworkPreludeBeforeTocDocumentModules() {
+        ReportDocument report = new ReportDocument();
+        report.setTitle("不应重复的报告标题");
+        ReportBasicInfo basicInfo = new ReportBasicInfo();
+        basicInfo.setReportNo("SHOULD-NOT-APPEAR-BEFORE-BODY");
+        report.setBasicInfo(basicInfo);
+        report.getSections().add(ReportSectionBuilder.section("正式正文").build());
+        ReportBlueprint blueprint = ReportBlueprint.builder("formal-body", "正式报告", "1.0")
+                .layout(ReportLayout.builder()
+                        .bodyTitle(true)
+                        .tableOfContents(3)
+                        .build())
+                .build();
+
+        SectionNode body = new DocxReportCompiler().compile(report, blueprint)
+                .getNode().getSections().get(0);
+
+        assertEquals(1, body.getBlocks().size());
+        assertTrue(body.getBlocks().get(0) instanceof ParagraphNode);
+    }
+
+    @Test
+    void retainsExplicitPreludeForDocumentWithoutTableOfContents() {
+        ReportDocument report = new ReportDocument();
+        report.setTitle("无目录报告标题");
+        ReportBasicInfo basicInfo = new ReportBasicInfo();
+        basicInfo.setReportNo("NO-TOC-001");
+        report.setBasicInfo(basicInfo);
+        report.getSections().add(ReportSectionBuilder.section("正文").build());
+        ReportBlueprint blueprint = ReportBlueprint.builder("no-toc", "无目录报告", "1.0")
+                .layout(ReportLayout.builder().bodyTitle(true).build())
+                .build();
+
+        SectionNode body = new DocxReportCompiler().compile(report, blueprint)
+                .getNode().getSections().get(0);
+
+        assertEquals("Title", paragraph(body.getBlocks().get(0)).getStyleName());
+        assertTrue(body.getBlocks().get(1) instanceof TableNode);
+        assertEquals("Heading1", paragraph(body.getBlocks().get(2)).getStyleName());
     }
 
     @Test
@@ -84,6 +132,7 @@ class DocxReportCompilerTest {
                 .layout(ReportLayout.builder()
                         .styleProfile(ReportStyleProfile.GJB_438C)
                         .headingNumberingEnabled(true)
+                        .bodyTitle(true)
                         .build())
                 .build();
 
@@ -97,6 +146,36 @@ class DocxReportCompilerTest {
         assertTrue(text.contains("导出框架职责"));
         assertTrue(text.contains("DefaultReportExporter"));
         assertTrue(hasPageNumberField(rendered));
+    }
+
+    @Test
+    void placesTableCaptionsAboveOrBelowAsConfigured() {
+        ReportDocument report = new ReportDocument();
+        report.setTitle("题注位置");
+        ReportSectionBuilder section = ReportSectionBuilder.section("表格");
+        section.table("列")
+                .row("上方题注表格")
+                .caption("上方题注", true, CaptionPosition.ABOVE)
+                .end();
+        section.table("列")
+                .row("下方题注表格")
+                .caption("下方题注", true, CaptionPosition.BELOW)
+                .end();
+        report.getSections().add(section.build());
+
+        DocxDocument document = new DocxReportCompiler().compile(report,
+                ReportBlueprint.builder("caption-position", "题注位置", "1.0").build());
+        List<DocxBlock> relevant = new ArrayList<>();
+        for (DocxBlock block : document.getNode().getSections().get(0).getBlocks()) {
+            if (block instanceof CaptionNode || block instanceof TableNode) {
+                relevant.add(block);
+            }
+        }
+
+        assertEquals(CaptionNode.class, relevant.get(0).getClass());
+        assertEquals(TableNode.class, relevant.get(1).getClass());
+        assertEquals(TableNode.class, relevant.get(2).getClass());
+        assertEquals(CaptionNode.class, relevant.get(3).getClass());
     }
 
     @Test
@@ -129,10 +208,10 @@ class DocxReportCompilerTest {
         DocxDocument document = new DocxReportCompiler().compile(report, blueprint);
         SectionNode section = document.getNode().getSections().get(0);
 
-        assertEquals("Heading1", paragraph(section.getBlocks().get(1)).getStyleName());
-        assertEquals("Heading2", paragraph(section.getBlocks().get(2)).getStyleName());
-        assertEquals("Heading3", paragraph(section.getBlocks().get(4)).getStyleName());
-        assertEquals("Heading3", paragraph(section.getBlocks().get(6)).getStyleName());
+        assertEquals("Heading1", paragraph(section.getBlocks().get(0)).getStyleName());
+        assertEquals("Heading2", paragraph(section.getBlocks().get(1)).getStyleName());
+        assertEquals("Heading3", paragraph(section.getBlocks().get(3)).getStyleName());
+        assertEquals("Heading3", paragraph(section.getBlocks().get(5)).getStyleName());
     }
 
     @Test
@@ -149,8 +228,8 @@ class DocxReportCompilerTest {
         DocxDocument document = new DocxReportCompiler().compile(report, blueprint);
         SectionNode section = document.getNode().getSections().get(0);
 
-        assertEquals(4, section.getBlocks().size());
-        assertEquals("Heading2", paragraph(section.getBlocks().get(2)).getStyleName());
+        assertEquals(3, section.getBlocks().size());
+        assertEquals("Heading2", paragraph(section.getBlocks().get(1)).getStyleName());
     }
 
     @Test

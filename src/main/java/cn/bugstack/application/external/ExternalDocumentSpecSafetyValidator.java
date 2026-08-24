@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 外部 DocumentSpec 的附加边界。DocumentSpec 1.0 图片仍使用受信路径，在 Asset ID 协议落地前不对外开放。
+ * 外部 DocumentSpec 的附加边界。外部调用只允许引用同一主体已托管的 Asset ID，禁止服务器路径。
  */
 final class ExternalDocumentSpecSafetyValidator {
 
@@ -32,8 +32,11 @@ final class ExternalDocumentSpecSafetyValidator {
             BlockSpec block = section.getBlocks().get(i);
             String blockPath = path + "/blocks/" + i;
             if (block instanceof ImageBlockSpec) {
-                violations.add(new DocumentSpecViolation(blockPath, "EXTERNAL_IMAGE_NOT_ALLOWED",
-                        "external DocumentSpec images require the future managed assetId protocol"));
+                ImageBlockSpec image = (ImageBlockSpec) block;
+                if (image.getSource() != null) {
+                    violations.add(new DocumentSpecViolation(blockPath + "/source", "EXTERNAL_IMAGE_SOURCE_NOT_ALLOWED",
+                            "external DocumentSpec images must use a managed assetId"));
+                }
             } else if (block instanceof SubsectionBlockSpec) {
                 SubsectionBlockSpec subsection = (SubsectionBlockSpec) block;
                 SectionSpec child = new SectionSpec(subsection.getTitle());

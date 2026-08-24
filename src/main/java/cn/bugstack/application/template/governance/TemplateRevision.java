@@ -14,6 +14,10 @@ public final class TemplateRevision {
     private String reviewComment;
     private Instant createdAt;
     private Instant updatedAt;
+    private String sampleDataSha256;
+    private String renderedSha256;
+    private long renderedSize;
+    private Instant publicationValidatedAt;
 
     public DocumentTemplateSpec getTemplate() { return template; }
     public void setTemplate(DocumentTemplateSpec template) { this.template = template; }
@@ -29,4 +33,12 @@ public final class TemplateRevision {
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public String getSampleDataSha256() { return sampleDataSha256; }
+    public void setSampleDataSha256(String sampleDataSha256) { this.sampleDataSha256 = sampleDataSha256; }
+    public String getRenderedSha256() { return renderedSha256; }
+    public void setRenderedSha256(String renderedSha256) { this.renderedSha256 = renderedSha256; }
+    public long getRenderedSize() { return renderedSize; }
+    public void setRenderedSize(long renderedSize) { this.renderedSize = renderedSize; }
+    public Instant getPublicationValidatedAt() { return publicationValidatedAt; }
+    public void setPublicationValidatedAt(Instant publicationValidatedAt) { this.publicationValidatedAt = publicationValidatedAt; }
 }

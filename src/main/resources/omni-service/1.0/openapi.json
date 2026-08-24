@@ -65,12 +65,14 @@
           {"name": "status", "in": "query", "schema": {"$ref": "#/components/schemas/GenerationJobStatus"}},
           {"name": "cursor", "in": "query", "schema": {"type": "string"}, "description": "Opaque stable pagination cursor returned as nextCursor"}
         ],
-        "responses": {"200": {"description": "Tenant generation jobs", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationJobPage"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
+        "description": "Lists jobs owned by the current principal. generation:read:any lists all jobs in the tenant.",
+        "responses": {"200": {"description": "Principal-owned generation jobs", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationJobPage"}}}}, "401": {"$ref": "#/components/responses/Problem"}}
       }
     },
     "/v1/generation-jobs/{jobId}": {
       "get": {
         "operationId": "getGenerationJob",
+        "description": "Reads an owned job; generation:read:any permits tenant-wide access.",
         "parameters": [{"$ref": "#/components/parameters/JobId"}],
         "responses": {"200": {"description": "Generation job", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationJob"}}}}, "404": {"$ref": "#/components/responses/Problem"}}
       }
@@ -78,6 +80,7 @@
     "/v1/generation-jobs/{jobId}/cancel": {
       "post": {
         "operationId": "cancelGenerationJob",
+        "description": "Cancels an owned job; generation:cancel:any permits tenant-wide access.",
         "parameters": [{"$ref": "#/components/parameters/JobId"}],
         "responses": {"200": {"description": "Cancelled job", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GenerationJob"}}}}, "409": {"$ref": "#/components/responses/Problem"}}
       }
@@ -85,8 +88,27 @@
     "/v1/generation-jobs/{jobId}/artifacts": {
       "get": {
         "operationId": "listGenerationArtifacts",
+        "description": "Lists artifacts of an owned job; generation:read:any permits tenant-wide access.",
         "parameters": [{"$ref": "#/components/parameters/JobId"}],
         "responses": {"200": {"description": "Generated artifacts"}, "404": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/generation-jobs/{jobId}/approve": {
+      "post": {
+        "operationId": "approveAiGenerationDraft",
+        "description": "Approves a PENDING_REVIEW AI draft and requeues deterministic rendering. Requires ai:review and a reviewer different from the creator.",
+        "parameters": [{"$ref": "#/components/parameters/JobId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AiReviewAction"}}}},
+        "responses": {"200": {"description": "Approved and requeued job"}, "409": {"$ref": "#/components/responses/Problem"}}
+      }
+    },
+    "/v1/generation-jobs/{jobId}/reject": {
+      "post": {
+        "operationId": "rejectAiGenerationDraft",
+        "description": "Rejects a PENDING_REVIEW AI draft and terminates the job. Requires ai:review.",
+        "parameters": [{"$ref": "#/components/parameters/JobId"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RequiredAiReviewAction"}}}},
+        "responses": {"200": {"description": "Rejected job"}, "409": {"$ref": "#/components/responses/Problem"}}
       }
     },
     "/v1/webhook-deliveries": {
@@ -96,6 +118,18 @@
         "responses": {
           "200": {"description": "Tenant webhook delivery audit records"},
           "404": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
+    "/v1/webhook-deliveries/{eventId}/redrive": {
+      "post": {
+        "operationId": "redriveWebhookDelivery",
+        "description": "Requeues a DEAD delivery with five additional attempts while preserving its event identity and attempt history.",
+        "parameters": [{"name": "eventId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "responses": {
+          "200": {"description": "Webhook delivery requeued"},
+          "400": {"$ref": "#/components/responses/Problem"},
+          "409": {"$ref": "#/components/responses/Problem"}
         }
       }
     },
@@ -142,7 +176,7 @@
       "post": {
         "operationId": "approveTemplateRevision",
         "parameters": [{"$ref": "#/components/parameters/TemplateId"}, {"$ref": "#/components/parameters/TemplateVersion"}],
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateAction"}}}},
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TemplateApprovalAction"}}}},
         "responses": {"200": {"description": "Published template revision"}, "409": {"$ref": "#/components/responses/Problem"}}
       }
     },
@@ -186,6 +220,7 @@
     "/artifacts/{artifactId}": {
       "get": {
         "operationId": "downloadArtifact",
+        "description": "Downloads an artifact owned by the current principal; artifacts:read:any permits tenant-wide access.",
         "parameters": [{"name": "artifactId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
         "responses": {"200": {"description": "Generated binary artifact"}, "404": {"$ref": "#/components/responses/Problem"}}
       }
@@ -209,7 +244,9 @@
       "GenerationRequest": {
         "oneOf": [
           {"$ref": "#/components/schemas/DocumentSpecGenerationRequest"},
-          {"$ref": "#/components/schemas/TemplateGenerationRequest"}
+          {"$ref": "#/components/schemas/TemplateGenerationRequest"},
+          {"$ref": "#/components/schemas/AiFreeformGenerationRequest"},
+          {"$ref": "#/components/schemas/AiTemplateGenerationRequest"}
         ]
       },
       "DocumentSpecGenerationRequest": {
@@ -238,6 +275,38 @@
           "webhookId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$", "description": "Pre-registered tenant webhook identifier; caller-supplied URLs are forbidden"}
         }
       },
+      "AiFreeformGenerationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode", "outputFormat", "instruction"],
+        "properties": {
+          "mode": {"type": "string", "enum": ["AI_FREEFORM"]},
+          "outputFormat": {"$ref": "#/components/schemas/OutputFormat"},
+          "instruction": {"type": "string", "minLength": 1, "maxLength": 20000},
+          "context": {"type": "object"},
+          "reviewPolicy": {"type": "string", "enum": ["AUTO", "REQUIRED"], "default": "AUTO"},
+          "maxAttempts": {"type": "integer", "minimum": 1, "maximum": 3, "default": 1},
+          "webhookId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"}
+        },
+        "description": "Requires generation:create and ai:generate. Available only when an internal AI provider is configured."
+      },
+      "AiTemplateGenerationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode", "outputFormat", "templateId", "templateVersion", "instruction"],
+        "properties": {
+          "mode": {"type": "string", "enum": ["AI_TEMPLATE"]},
+          "outputFormat": {"$ref": "#/components/schemas/OutputFormat"},
+          "templateId": {"type": "string", "minLength": 1},
+          "templateVersion": {"type": "string", "minLength": 1},
+          "instruction": {"type": "string", "minLength": 1, "maxLength": 20000},
+          "context": {"type": "object"},
+          "reviewPolicy": {"type": "string", "enum": ["AUTO", "REQUIRED"], "default": "AUTO"},
+          "maxAttempts": {"type": "integer", "minimum": 1, "maximum": 3, "default": 1},
+          "webhookId": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"}
+        },
+        "description": "The model fills data for the explicit template version; deterministic template expansion and export remain authoritative. Requires generation:create and ai:generate."
+      },
       "OutputFormat": {"type": "string", "enum": ["DOCX", "PDF", "HTML"]},
       "TemplateStatus": {"type": "string", "enum": ["DRAFT", "IN_REVIEW", "PUBLISHED", "REJECTED", "RETIRED"]},
       "TemplateRevision": {
@@ -258,6 +327,25 @@
         "additionalProperties": false,
         "properties": {"comment": {"type": "string", "maxLength": 2000}}
       },
+      "TemplateApprovalAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sampleData"],
+        "properties": {
+          "comment": {"type": "string", "maxLength": 2000},
+          "sampleData": {"type": "object", "description": "Representative data rendered and reopened before publication"}
+        }
+      },
+      "AiReviewAction": {
+        "type": "object", "additionalProperties": false,
+        "properties": {"comment": {"type": "string", "maxLength": 2000}}
+      },
+      "RequiredAiReviewAction": {
+        "allOf": [
+          {"$ref": "#/components/schemas/AiReviewAction"},
+          {"type": "object", "required": ["comment"]}
+        ]
+      },
       "RequiredTemplateAction": {
         "allOf": [
           {"$ref": "#/components/schemas/TemplateAction"},
@@ -272,8 +360,12 @@
           "tenantId": {"type": "string"},
           "principalId": {"type": "string"},
           "correlationId": {"type": "string"},
-          "mode": {"type": "string", "enum": ["TEMPLATE_DATA", "DOCUMENT_SPEC"]},
+          "mode": {"type": "string", "enum": ["TEMPLATE_DATA", "DOCUMENT_SPEC", "AI_FREEFORM", "AI_TEMPLATE"]},
           "status": {"$ref": "#/components/schemas/GenerationJobStatus"},
+          "currentStage": {"type": "string"},
+          "stageStartedAt": {"type": "string", "format": "date-time"},
+          "deadlineAt": {"type": "string", "format": "date-time"},
+          "draftId": {"type": "string", "format": "uuid"},
           "attemptCount": {"type": "integer", "minimum": 0},
           "maxAttempts": {"type": "integer", "minimum": 1, "maximum": 3},
           "webhookId": {"type": "string"},
@@ -288,7 +380,7 @@
           "artifacts": {"type": "array", "items": {"$ref": "#/components/schemas/Artifact"}}
         }
       },
-      "GenerationJobStatus": {"type": "string", "enum": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]},
+      "GenerationJobStatus": {"type": "string", "enum": ["QUEUED", "RUNNING", "PENDING_REVIEW", "SUCCEEDED", "FAILED", "CANCELLED"]},
       "GenerationJobPage": {
         "type": "object",
         "required": ["jobs", "limit"],

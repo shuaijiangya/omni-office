@@ -14,6 +14,7 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.file.Path;
 
 /** AWS S3、MinIO 及兼容服务的生产对象适配器。 */
 public final class S3ArtifactObjectStorage implements ArtifactObjectStorage {
@@ -49,11 +50,26 @@ public final class S3ArtifactObjectStorage implements ArtifactObjectStorage {
 
     /** {@inheritDoc} */
     @Override
+    public void put(String key, Path contentPath, String mediaType) {
+        if (contentPath == null || mediaType == null) throw new IllegalArgumentException("S3 object is invalid");
+        client.putObject(PutObjectRequest.builder().bucket(bucket).key(fullKey(key))
+                        .contentType(mediaType).build(), RequestBody.fromFile(contentPath));
+    }
+
+    /** {@inheritDoc} */
+    @Override
     public byte[] get(String key) {
         ResponseBytes<GetObjectResponse> value = client.getObject(
                 GetObjectRequest.builder().bucket(bucket).key(fullKey(key)).build(),
                 ResponseTransformer.toBytes());
         return value.asByteArray();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public void get(String key, Path destination) {
+        client.getObject(GetObjectRequest.builder().bucket(bucket).key(fullKey(key)).build(),
+                ResponseTransformer.toFile(destination));
     }
 
     /** {@inheritDoc} */

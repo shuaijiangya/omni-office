@@ -13,6 +13,7 @@ public final class ExternalArtifactReference {
     private final String sha256;
     private final Instant createdAt;
     private final Instant expiresAt;
+    private final String ownerPrincipalId;
 
     public ExternalArtifactReference(String artifactId, String resourceUri, String fileName,
                                      String mediaType, long size, String sha256) {
@@ -30,6 +31,21 @@ public final class ExternalArtifactReference {
         this.sha256 = sha256;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
+        this.ownerPrincipalId = null;
+    }
+
+    public ExternalArtifactReference(String artifactId, String resourceUri, String fileName,
+                                     String mediaType, long size, String sha256,
+                                     Instant createdAt, Instant expiresAt, String ownerPrincipalId) {
+        this.artifactId = artifactId;
+        this.resourceUri = resourceUri;
+        this.fileName = fileName;
+        this.mediaType = mediaType;
+        this.size = size;
+        this.sha256 = sha256;
+        this.createdAt = createdAt;
+        this.expiresAt = expiresAt;
+        this.ownerPrincipalId = ownerPrincipalId;
     }
 
     public String getArtifactId() {
@@ -62,5 +78,14 @@ public final class ExternalArtifactReference {
 
     public Instant getExpiresAt() {
         return expiresAt;
+    }
+
+    /**
+     * 返回工件所属主体。旧版工件没有该元数据时返回 {@code null}，只能由拥有跨主体权限的调用方读取。
+     *
+     * @return 所属主体 ID，或 {@code null}
+     */
+    public String getOwnerPrincipalId() {
+        return ownerPrincipalId;
     }
 }

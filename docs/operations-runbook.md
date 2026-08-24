@@ -13,7 +13,7 @@ Token、Webhook Secret、模板数据或 DocumentSpec 正文复制到工单。
 ## 服务不可用或未就绪
 
 1. 分别请求 live 和 ready，确认是进程故障还是依赖故障。
-2. 按 ready 的失败项检查数据卷权限、PostgreSQL 连接/Flyway 版本或 S3 Endpoint/Bucket 权限。
+2. 按 ready 的失败项检查数据卷权限、PostgreSQL 连接与人工准备的表结构，或 S3 Endpoint/Bucket 权限。
 3. 数据库恢复前不要切换到文件仓储继续接收生产流量，这会形成两个不一致的任务队列。
 4. 依赖恢复后观察 queued/running 数量；Worker 会在原租约到期后接管，不要批量重置 RUNNING。
 

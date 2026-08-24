@@ -49,9 +49,31 @@ public final class ReportSectionBuilder {
      * @return 当前构建器
      */
     public ReportSectionBuilder paragraph(String styleName, String text) {
+        return paragraph(styleName, text, null);
+    }
+
+    /**
+     * 追加指定样式和字体颜色的段落。
+     *
+     * @param styleName 段落样式名称
+     * @param text 段落文本
+     * @param fontColor 字体颜色，格式为 {@code #RRGGBB}
+     * @return 当前构建器
+     */
+    public ReportSectionBuilder paragraph(String styleName, String text, String fontColor) {
         ReportParagraph paragraph = new ReportParagraph(text);
         paragraph.setStyleName(styleName);
+        paragraph.setFontColor(fontColor);
         return add(paragraph);
+    }
+
+    /**
+     * 开始构建包含多个独立样式文本范围的段落。
+     *
+     * @return 富文本段落构建器
+     */
+    public ReportParagraphBuilder richParagraph() {
+        return new ReportParagraphBuilder(this);
     }
 
     /**
@@ -61,7 +83,20 @@ public final class ReportSectionBuilder {
      * @return 当前构建器
      */
     public ReportSectionBuilder bullet(String text) {
-        return add(new ReportListItem(ReportListType.BULLET, text));
+        return bullet(text, null);
+    }
+
+    /**
+     * 追加指定字体颜色的项目符号列表项。
+     *
+     * @param text 列表项文本
+     * @param fontColor 字体颜色，格式为 {@code #RRGGBB}
+     * @return 当前构建器
+     */
+    public ReportSectionBuilder bullet(String text, String fontColor) {
+        ReportListItem item = new ReportListItem(ReportListType.BULLET, text);
+        item.setFontColor(fontColor);
+        return add(item);
     }
 
     /**
@@ -71,7 +106,20 @@ public final class ReportSectionBuilder {
      * @return 当前构建器
      */
     public ReportSectionBuilder numbered(String text) {
-        return add(new ReportListItem(ReportListType.NUMBERED, text));
+        return numbered(text, null);
+    }
+
+    /**
+     * 追加指定字体颜色的编号列表项。
+     *
+     * @param text 列表项文本
+     * @param fontColor 字体颜色，格式为 {@code #RRGGBB}
+     * @return 当前构建器
+     */
+    public ReportSectionBuilder numbered(String text, String fontColor) {
+        ReportListItem item = new ReportListItem(ReportListType.NUMBERED, text);
+        item.setFontColor(fontColor);
+        return add(item);
     }
 
     /**
@@ -94,11 +142,28 @@ public final class ReportSectionBuilder {
      * @return 当前构建器
      */
     public ReportSectionBuilder image(String source, Integer width, Integer height, String caption) {
+        return image(source, width, height, caption, CaptionPosition.BELOW);
+    }
+
+    /**
+     * 追加图片并设置图题位置。
+     *
+     * @param source 图片来源
+     * @param width 宽度，单位由目标编译器解释
+     * @param height 高度，单位由目标编译器解释
+     * @param caption 图题文本
+     * @param captionPosition 图题位于图片上方或下方
+     * @return 当前构建器
+     */
+    public ReportSectionBuilder image(String source, Integer width, Integer height, String caption,
+                                      CaptionPosition captionPosition) {
         ReportImage image = new ReportImage(source);
         image.setWidth(width);
         image.setHeight(height);
         if (caption != null && !caption.trim().isEmpty()) {
-            image.setCaption(new ReportCaption(CaptionTargetType.IMAGE, caption.trim()));
+            ReportCaption reportCaption = new ReportCaption(CaptionTargetType.IMAGE, caption.trim());
+            reportCaption.setPosition(captionPosition);
+            image.setCaption(reportCaption);
         }
         return add(image);
     }

@@ -41,7 +41,7 @@ public final class DefaultStyles {
      * <p>注册表包含段落样式、表格样式和单元格基础样式。段落样式覆盖
      * {@code Normal}、{@code Title}、{@code Subtitle}、{@code Heading1} 到
      * {@code Heading9}、{@code BodyText}、{@code Caption}、{@code ImageCaption}
-     * 和 {@code CodeBlock}。表格样式覆盖普通边框表格和表头加粗表格。</p>
+     * 和 {@code CodeBlock}。表格样式覆盖普通边框表格，以及表头、表内容可独立配置的表格。</p>
      *
      * @return 包含常用段落、表格和图片样式的注册表
      */
@@ -71,7 +71,7 @@ public final class DefaultStyles {
 
         TableStyle tableHeader = new TableStyle("TableHeader");
         tableHeader.setBordered(true);
-        tableHeader.setHeaderBold(true);
+        tableHeader.setRepeatHeaderRow(true);
         registry.registerTableStyle(tableHeader);
 
         registry.registerTableStyle(new TableStyle("TableCell"));

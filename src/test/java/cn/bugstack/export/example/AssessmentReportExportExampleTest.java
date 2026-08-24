@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -35,6 +37,26 @@ class AssessmentReportExportExampleTest {
     }
 
     /**
+     * 验证目录后直接衔接第一个模块内容，不包含框架追加的标题或基础信息表。
+     *
+     * @throws Exception 示例文档生成或读取失败时抛出
+     */
+    @Test
+    void startsBodyDirectlyWithFirstModuleContentAfterTableOfContents() throws Exception {
+        AssessmentReportExportExample.main(new String[0]);
+
+        Path output = Path.of("target/assessment-report-example.docx");
+        Document document = new Document(output.toString());
+        Section bodySection = document.getSections().get(document.getSections().getCount() - 1);
+        Paragraph firstBodyParagraph = firstNonEmptyParagraph(bodySection);
+
+        assertEquals("评估概述", firstBodyParagraph.getText().trim());
+        assertFalse(bodySection.getText().contains("ASSESSMENT-20260806-001"));
+        assertFalse(bodySection.getText().contains("报告编号"));
+        assertFalse(bodySection.getText().contains("生成时间"));
+    }
+
+    /**
      * 验证指定标题使用 Word 原生列表编号。
      *
      * @param document 已更新列表标签的 Word 文档
@@ -52,5 +74,20 @@ class AssessmentReportExportExampleTest {
             }
         }
         throw new AssertionError("heading not found: " + headingText);
+    }
+
+    /**
+     * 获取 Section 中第一个包含正文字符的段落。
+     *
+     * @param section 待检查的 Word Section
+     * @return 第一个非空段落
+     */
+    private Paragraph firstNonEmptyParagraph(Section section) {
+        for (Paragraph paragraph : section.getBody().getParagraphs()) {
+            if (!paragraph.getText().trim().isEmpty()) {
+                return paragraph;
+            }
+        }
+        throw new AssertionError("body section does not contain a non-empty paragraph");
     }
 }

@@ -20,6 +20,7 @@ import cn.bugstack.office.docx.model.RevisionHistoryNode;
 import cn.bugstack.office.docx.model.SectionNode;
 import cn.bugstack.office.docx.model.TableCellNode;
 import cn.bugstack.office.docx.model.TableCellVerticalAlignment;
+import cn.bugstack.office.docx.model.TableHorizontalAlignment;
 import cn.bugstack.office.docx.model.TableNode;
 import cn.bugstack.office.docx.model.TableRowNode;
 import cn.bugstack.office.docx.model.TableVerticalMerge;
@@ -27,9 +28,11 @@ import cn.bugstack.office.docx.model.TemplateCoverPageNode;
 import cn.bugstack.office.docx.model.TextRunInline;
 import cn.bugstack.office.docx.model.VisioInline;
 import cn.bugstack.office.docx.style.ParagraphStyle;
+import cn.bugstack.office.docx.style.RunStyle;
 import cn.bugstack.office.docx.style.StyleRegistry;
 import cn.bugstack.office.docx.style.TableStyle;
 import com.aspose.words.BreakType;
+import com.aspose.words.Cell;
 import com.aspose.words.CellMerge;
 import com.aspose.words.Document;
 import com.aspose.words.DocumentBuilder;
@@ -58,10 +61,12 @@ import com.aspose.words.Shape;
 import com.aspose.words.StyleIdentifier;
 import com.aspose.words.Style;
 import com.aspose.words.Table;
+import com.aspose.words.TableAlignment;
 import com.aspose.words.Underline;
 import com.aspose.words.CellVerticalAlignment;
 
 import javax.imageio.ImageIO;
+import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -229,12 +234,12 @@ public class AsposeDocxRenderer implements DocxRenderer {
         renderSimpleHeading("修订记录", context);
         DocumentBuilder builder = context.getBuilder();
         builder.startTable();
-        writeTableTextRow(builder, "版本", "日期", "说明", "修订人");
+        writeTableTextRow(builder, true, "版本", "日期", "说明", "修订人");
         for (RevisionHistoryNode.RevisionRecord record : history.getRecords()) {
-            writeTableTextRow(builder, record.getVersion(), record.getDate(), record.getDescription(), record.getAuthor());
+            writeTableTextRow(builder, false,
+                    record.getVersion(), record.getDate(), record.getDescription(), record.getAuthor());
         }
-        builder.endTable();
-        builder.writeln();
+        finishSimpleTable(builder);
     }
 
     /** 渲染审批或签署页面。 */
@@ -242,12 +247,11 @@ public class AsposeDocxRenderer implements DocxRenderer {
         renderSimpleHeading("签署页", context);
         DocumentBuilder builder = context.getBuilder();
         builder.startTable();
-        writeTableTextRow(builder, "角色", "签署人", "日期");
+        writeTableTextRow(builder, true, "角色", "签署人", "日期");
         for (ApprovalPageNode.ApprovalRecord record : approvalPage.getRecords()) {
-            writeTableTextRow(builder, record.getRole(), record.getPerson(), record.getDate());
+            writeTableTextRow(builder, false, record.getRole(), record.getPerson(), record.getDate());
         }
-        builder.endTable();
-        builder.writeln();
+        finishSimpleTable(builder);
     }
 
     /** 使用一级标题样式写入前置页面的简单标题。 */
@@ -262,14 +266,43 @@ public class AsposeDocxRenderer implements DocxRenderer {
         context.getBuilder().getFont().clearFormatting();
     }
 
-    /** 向当前表格写入一行文本单元格。 */
-    private void writeTableTextRow(DocumentBuilder builder, String... values) throws Exception {
+    /** 向当前内置表格写入一行，并区分表头与表内容文本样式。 */
+    private void writeTableTextRow(DocumentBuilder builder, boolean header, String... values) throws Exception {
+        TableStyle tableStyle = styleRegistry.getTableStyle("TableHeader");
         for (String value : values) {
             builder.insertCell();
             builder.getCellFormat().getBorders().setLineStyle(LineStyle.SINGLE);
+            builder.getCellFormat().setVerticalAlignment(CellVerticalAlignment.CENTER);
+            builder.getParagraphFormat().setAlignment(ParagraphAlignment.CENTER);
+            applyTableTextStyle(resolveTableTextStyle(tableStyle, null, header ? 0 : 1), builder);
             builder.write(value);
         }
         builder.endRow();
+    }
+
+    /** 完成内置简单表格并应用与业务表格一致的响应式宽度。 */
+    private void finishSimpleTable(DocumentBuilder builder) throws Exception {
+        Table table = builder.endTable();
+        double availableWidth = resolveAvailablePageWidth(builder);
+        table.setAllowAutoFit(false);
+        table.setPreferredWidth(PreferredWidth.fromPoints(availableWidth));
+        if (table.getFirstRow() != null) {
+            table.getFirstRow().getRowFormat().setHeadingFormat(true);
+        }
+        for (Row row : table.getRows()) {
+            row.getRowFormat().setAllowBreakAcrossPages(false);
+            double cellWidth = row.getCells().getCount() == 0 ? 0D : availableWidth / row.getCells().getCount();
+            for (Cell cell : row.getCells()) {
+                cell.getCellFormat().setWidth(cellWidth);
+                cell.getCellFormat().setPreferredWidth(PreferredWidth.fromPoints(cellWidth));
+                cell.getCellFormat().setVerticalAlignment(CellVerticalAlignment.CENTER);
+                cell.getFirstParagraph().getParagraphFormat().setAlignment(ParagraphAlignment.CENTER);
+            }
+        }
+        builder.writeln();
+        builder.getCellFormat().clearFormatting();
+        builder.getParagraphFormat().clearFormatting();
+        builder.getFont().clearFormatting();
     }
 
     /**
@@ -864,13 +897,59 @@ public class AsposeDocxRenderer implements DocxRenderer {
     private void renderInline(DocxInline inline, RenderContext context) throws Exception {
         DocumentBuilder builder = context.getBuilder();
         if (inline instanceof TextRunInline) {
-            builder.write(((TextRunInline) inline).getText());
+            renderTextRun((TextRunInline) inline, builder);
         } else if (inline instanceof CaptionRefInline) {
             renderCaptionReference((CaptionRefInline) inline, context);
         } else if (inline instanceof ImageInline) {
             insertImage((ImageInline) inline, builder);
         } else if (inline instanceof VisioInline) {
             insertVisio((VisioInline) inline, builder);
+        }
+    }
+
+    /**
+     * 渲染带可选独立样式的文本范围，并在写入后恢复段落继承样式。
+     */
+    private void renderTextRun(TextRunInline textRun, DocumentBuilder builder) throws Exception {
+        RunStyle style = textRun.getStyle();
+        if (style == null) {
+            builder.write(textRun.getText());
+            return;
+        }
+        String inheritedAsciiFont = builder.getFont().getNameAscii();
+        String inheritedFarEastFont = builder.getFont().getNameFarEast();
+        double inheritedSize = builder.getFont().getSize();
+        boolean inheritedBold = builder.getFont().getBold();
+        boolean inheritedItalic = builder.getFont().getItalic();
+        int inheritedUnderline = builder.getFont().getUnderline();
+        Color inheritedColor = builder.getFont().getColor();
+        try {
+            if (style.getFontFamily() != null && !style.getFontFamily().trim().isEmpty()) {
+                builder.getFont().setNameAscii(style.getFontFamily());
+                builder.getFont().setNameFarEast(style.getFontFamily());
+            }
+            if (style.getAsciiFontFamily() != null && !style.getAsciiFontFamily().trim().isEmpty()) {
+                builder.getFont().setNameAscii(style.getAsciiFontFamily());
+            }
+            if (style.getFarEastFontFamily() != null && !style.getFarEastFontFamily().trim().isEmpty()) {
+                builder.getFont().setNameFarEast(style.getFarEastFontFamily());
+            }
+            if (style.getFontSize() != null) builder.getFont().setSize(style.getFontSize());
+            if (style.isBoldSet()) builder.getFont().setBold(style.isBold());
+            if (style.isItalicSet()) builder.getFont().setItalic(style.isItalic());
+            if (style.isUnderlineSet()) {
+                builder.getFont().setUnderline(style.isUnderline() ? Underline.SINGLE : Underline.NONE);
+            }
+            if (style.getColor() != null) builder.getFont().setColor(Color.decode(style.getColor()));
+            builder.write(textRun.getText());
+        } finally {
+            builder.getFont().setNameAscii(inheritedAsciiFont);
+            builder.getFont().setNameFarEast(inheritedFarEastFont);
+            builder.getFont().setSize(inheritedSize);
+            builder.getFont().setBold(inheritedBold);
+            builder.getFont().setItalic(inheritedItalic);
+            builder.getFont().setUnderline(inheritedUnderline);
+            builder.getFont().setColor(inheritedColor);
         }
     }
 
@@ -955,13 +1034,14 @@ public class AsposeDocxRenderer implements DocxRenderer {
     private void renderTable(TableNode table, RenderContext context) throws Exception {
         DocumentBuilder builder = context.getBuilder();
         TableStyle tableStyle = styleRegistry.getTableStyle(table.getStyleName());
+        double availableWidth = resolveAvailablePageWidth(builder);
         builder.startTable();
         for (int rowIndex = 0; rowIndex < table.getRows().size(); rowIndex++) {
             TableRowNode row = table.getRows().get(rowIndex);
             int columnIndex = 0;
             for (TableCellNode cell : row.getCells()) {
                 builder.insertCell();
-                applyTableCellStyle(tableStyle, table, rowIndex, columnIndex, cell.getColumnSpan(), builder);
+                applyTableCellStyle(tableStyle, table, rowIndex, columnIndex, availableWidth, builder);
                 builder.getCellFormat().setHorizontalMerge(cell.getColumnSpan() > 1 ? CellMerge.FIRST : CellMerge.NONE);
                 builder.getCellFormat().setVerticalMerge(toAsposeCellMerge(cell.getVerticalMerge()));
                 builder.getCellFormat().setVerticalAlignment(toAsposeCellVerticalAlignment(cell.getVerticalAlignment()));
@@ -969,29 +1049,33 @@ public class AsposeDocxRenderer implements DocxRenderer {
                 columnIndex += cell.getColumnSpan();
                 for (int merged = 1; merged < cell.getColumnSpan(); merged++) {
                     builder.insertCell();
-                    applyMergedFollowerCellStyle(tableStyle, table, rowIndex, columnIndex - cell.getColumnSpan() + merged, builder);
+                    applyMergedFollowerCellStyle(tableStyle, table, rowIndex,
+                            columnIndex - cell.getColumnSpan() + merged, cell.getVerticalMerge(), availableWidth, builder);
                 }
             }
             builder.endRow();
         }
         Table renderedTable = builder.endTable();
-        if (tableStyle != null && tableStyle.isHeaderBold() && renderedTable.getFirstRow() != null) {
+        renderedTable.setAlignment(toAsposeTableAlignment(table.getAlignment()));
+        if (tableStyle != null && tableStyle.isRepeatHeaderRow() && renderedTable.getFirstRow() != null) {
             renderedTable.getFirstRow().getRowFormat().setHeadingFormat(true);
         }
         for (Row row : renderedTable.getRows()) {
             row.getRowFormat().setAllowBreakAcrossPages(false);
         }
-        if (table.getColumnWidths().length > 0) {
-            renderedTable.setAllowAutoFit(false);
-        }
+        // 根据当前 Section 的纸张、方向和页边距生成完整 OOXML 几何，避免不同 Word 渲染器解释不一致。
+        renderedTable.setAllowAutoFit(false);
+        renderedTable.setPreferredWidth(PreferredWidth.fromPoints(availableWidth));
         builder.writeln();
         builder.getCellFormat().clearFormatting();
+        builder.getParagraphFormat().clearFormatting();
         builder.getFont().clearFormatting();
     }
 
     /** 应用普通表格单元格的边框、对齐与表头样式。 */
     private void applyTableCellStyle(TableStyle tableStyle, TableNode table, int rowIndex, int columnIndex,
-                                     int columnSpan, DocumentBuilder builder) throws Exception {
+                                     double availableWidth,
+                                     DocumentBuilder builder) throws Exception {
         builder.getCellFormat().clearFormatting();
         if (tableStyle == null) {
             builder.getCellFormat().setHorizontalMerge(CellMerge.NONE);
@@ -1002,15 +1086,19 @@ public class AsposeDocxRenderer implements DocxRenderer {
             }
             builder.getFont().setBold(tableStyle.isHeaderBold() && rowIndex == 0);
         }
-        double width = sumColumnWidths(table, columnIndex, columnSpan);
+        applyTableTextStyle(resolveTableTextStyle(tableStyle, table, rowIndex), builder);
+        // 横向合并仍由多个物理单元格组成：起始格和后续格必须各占一列，避免重复累计宽度。
+        double width = resolveColumnWidth(table, columnIndex, availableWidth);
         if (width > 0) {
             builder.getCellFormat().setWidth(width);
             builder.getCellFormat().setPreferredWidth(PreferredWidth.fromPoints(width));
         }
     }
 
-    /** 应用纵向合并后续单元格的边框与尺寸样式。 */
+    /** 应用横向合并后续单元格的边框、纵向合并状态与尺寸样式。 */
     private void applyMergedFollowerCellStyle(TableStyle tableStyle, TableNode table, int rowIndex, int columnIndex,
+                                              TableVerticalMerge verticalMerge,
+                                              double availableWidth,
                                               DocumentBuilder builder) throws Exception {
         builder.getCellFormat().clearFormatting();
         if (tableStyle != null && tableStyle.isBordered()) {
@@ -1018,26 +1106,123 @@ public class AsposeDocxRenderer implements DocxRenderer {
             builder.getCellFormat().getBorders().setLineWidth(0.5);
         }
         builder.getFont().setBold(tableStyle != null && tableStyle.isHeaderBold() && rowIndex == 0);
+        applyTableTextStyle(resolveTableTextStyle(tableStyle, table, rowIndex), builder);
         builder.getCellFormat().setHorizontalMerge(CellMerge.PREVIOUS);
-        builder.getCellFormat().setVerticalMerge(CellMerge.NONE);
-        double width = sumColumnWidths(table, columnIndex, 1);
+        builder.getCellFormat().setVerticalMerge(toAsposeCellMerge(verticalMerge));
+        double width = resolveColumnWidth(table, columnIndex, availableWidth);
         if (width > 0) {
             builder.getCellFormat().setWidth(width);
             builder.getCellFormat().setPreferredWidth(PreferredWidth.fromPoints(width));
         }
     }
 
-    /** 计算横向合并单元格覆盖列的总宽度。 */
-    private double sumColumnWidths(TableNode table, int columnIndex, int columnSpan) {
-        double[] widths = table.getColumnWidths();
-        if (widths.length == 0 || columnIndex >= widths.length) {
+    /** 将封装层表格对齐枚举转换为 Aspose 常量。 */
+    private int toAsposeTableAlignment(TableHorizontalAlignment alignment) {
+        if (alignment == TableHorizontalAlignment.CENTER) {
+            return TableAlignment.CENTER;
+        }
+        if (alignment == TableHorizontalAlignment.RIGHT) {
+            return TableAlignment.RIGHT;
+        }
+        return TableAlignment.LEFT;
+    }
+
+    /** 根据行位置合并文档默认样式与当前表格的动态覆盖。 */
+    private RunStyle resolveTableTextStyle(TableStyle tableStyle, TableNode table, int rowIndex) {
+        TableStyle effectiveTableStyle = tableStyle == null ? new TableStyle("__renderer_default") : tableStyle;
+        RunStyle base = rowIndex == 0
+                ? effectiveTableStyle.getHeaderTextStyle() : effectiveTableStyle.getBodyTextStyle();
+        RunStyle override = table == null ? null
+                : rowIndex == 0 ? table.getHeaderTextStyle() : table.getBodyTextStyle();
+        return mergeRunStyle(base, override);
+    }
+
+    /** 将非空的单表配置覆盖到文档级表格样式之上。 */
+    private RunStyle mergeRunStyle(RunStyle base, RunStyle override) {
+        if (base == null && override == null) return null;
+        RunStyle result = base == null ? new RunStyle() : base.copy();
+        if (override == null) return result;
+        if (override.getFontFamily() != null) result.setFontFamily(override.getFontFamily());
+        if (override.getAsciiFontFamily() != null) result.setAsciiFontFamily(override.getAsciiFontFamily());
+        if (override.getFarEastFontFamily() != null) result.setFarEastFontFamily(override.getFarEastFontFamily());
+        if (override.getFontSize() != null) result.setFontSize(override.getFontSize());
+        if (override.getColor() != null) result.setColor(override.getColor());
+        if (override.isBoldSet()) result.setBold(override.isBold());
+        if (override.isItalicSet()) result.setItalic(override.isItalic());
+        if (override.isUnderlineSet()) result.setUnderline(override.isUnderline());
+        return result;
+    }
+
+    /** 应用表头或表内容的基础文本样式，供单个文本范围继续覆盖。 */
+    private void applyTableTextStyle(RunStyle style, DocumentBuilder builder) throws Exception {
+        String sharedFontFamily = style == null ? null : style.getFontFamily();
+        String asciiFontFamily = resolveFontFamily(style == null ? null : style.getAsciiFontFamily(),
+                sharedFontFamily, builder.getFont().getNameAscii());
+        String farEastFontFamily = resolveFontFamily(style == null ? null : style.getFarEastFontFamily(),
+                sharedFontFamily, builder.getFont().getNameFarEast());
+        double fontSize = style == null || style.getFontSize() == null
+                ? builder.getFont().getSize() : style.getFontSize();
+        builder.getFont().setNameAscii(asciiFontFamily);
+        builder.getFont().setNameFarEast(farEastFontFamily);
+        builder.getFont().setSize(fontSize);
+        if (style != null && style.getColor() != null) {
+            builder.getFont().setColor(Color.decode(style.getColor()));
+        }
+        builder.getFont().setBold(style != null && style.isBoldSet() && style.isBold());
+        builder.getFont().setItalic(style != null && style.isItalicSet() && style.isItalic());
+        builder.getFont().setUnderline(style != null && style.isUnderlineSet() && style.isUnderline()
+                ? Underline.SINGLE : Underline.NONE);
+    }
+
+    /** 按专用字体、通用字体、默认字体的顺序解析 Word 字体槽位。 */
+    private String resolveFontFamily(String specializedFontFamily, String sharedFontFamily, String defaultFontFamily) {
+        if (specializedFontFamily != null && !specializedFontFamily.trim().isEmpty()) {
+            return specializedFontFamily;
+        }
+        if (sharedFontFamily != null && !sharedFontFamily.trim().isEmpty()) {
+            return sharedFontFamily;
+        }
+        return defaultFontFamily;
+    }
+
+    /**
+     * 按调用方提供的比例权重计算当前页面中的实际列宽。
+     *
+     * <p>列宽数组按比例权重解释；未提供或数量不匹配时，各列平均分配页面可用宽度。</p>
+     */
+    private double resolveColumnWidth(TableNode table, int columnIndex, double availableWidth) {
+        int columnCount = resolveColumnCount(table);
+        if (columnCount <= 0 || columnIndex < 0 || columnIndex >= columnCount) {
             return 0;
         }
-        double width = 0;
-        for (int i = columnIndex; i < columnIndex + columnSpan && i < widths.length; i++) {
-            width += widths[i];
+        double[] weights = table.getColumnWidths();
+        if (weights.length != columnCount) {
+            return availableWidth / columnCount;
         }
-        return width;
+        double total = 0D;
+        for (double weight : weights) {
+            total += weight;
+        }
+        return total > 0D ? weights[columnIndex] * availableWidth / total : availableWidth / columnCount;
+    }
+
+    /** 计算当前 Section 扣除左右页边距后的正文可用宽度。 */
+    private double resolveAvailablePageWidth(DocumentBuilder builder) throws Exception {
+        com.aspose.words.PageSetup pageSetup = builder.getCurrentSection().getPageSetup();
+        return pageSetup.getPageWidth() - pageSetup.getLeftMargin() - pageSetup.getRightMargin();
+    }
+
+    /** 计算表格任一行占用的最大逻辑列数。 */
+    private int resolveColumnCount(TableNode table) {
+        int columnCount = 0;
+        for (TableRowNode row : table.getRows()) {
+            int current = 0;
+            for (TableCellNode cell : row.getCells()) {
+                current += cell.getColumnSpan();
+            }
+            columnCount = Math.max(columnCount, current);
+        }
+        return columnCount;
     }
 
     /** 将封装层纸张规格转换为 Aspose 常量。 */
@@ -1083,9 +1268,11 @@ public class AsposeDocxRenderer implements DocxRenderer {
 
     /** 渲染单元格内的段落及其他块级内容。 */
     private void renderCell(TableCellNode cell, RenderContext context) throws Exception {
+        DocumentBuilder builder = context.getBuilder();
         for (DocxBlock block : cell.getBlocks()) {
             if (block instanceof ParagraphNode) {
                 ParagraphNode paragraph = (ParagraphNode) block;
+                builder.getParagraphFormat().setAlignment(ParagraphAlignment.CENTER);
                 for (DocxInline inline : paragraph.getInlines()) {
                     renderInline(inline, context);
                 }

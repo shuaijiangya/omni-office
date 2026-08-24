@@ -3,6 +3,7 @@ package cn.bugstack.export.document;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * 报告语义表格构建器。
@@ -36,13 +37,81 @@ public final class ReportTableBuilder {
     }
 
     /**
-     * 设置列宽，单位为 point。
+     * 设置列宽比例权重，表格总宽度由当前页面正文宽度决定。
      *
-     * @param widths 列宽数组
+     * @param widths 列宽比例权重，例如 {@code 1, 2, 1}
      * @return 当前构建器
      */
     public ReportTableBuilder widths(double... widths) {
         table.setColumnWidths(widths);
+        return this;
+    }
+
+    /**
+     * 设置表格水平对齐方式。
+     *
+     * @param alignment 左对齐、居中或右对齐
+     * @return 当前构建器
+     */
+    public ReportTableBuilder alignment(ReportTableAlignment alignment) {
+        table.setAlignment(alignment);
+        return this;
+    }
+
+    /**
+     * 设置表格内文本字体颜色。
+     *
+     * @param fontColor 字体颜色，格式为 {@code #RRGGBB}
+     * @return 当前构建器
+     */
+    public ReportTableBuilder fontColor(String fontColor) {
+        table.setFontColor(fontColor);
+        return this;
+    }
+
+    /**
+     * 动态设置当前表格的表头文本样式。
+     *
+     * @param customizer 表头样式配置回调
+     * @return 当前构建器
+     */
+    public ReportTableBuilder headerTextStyle(Consumer<ReportTextRangeStyle> customizer) {
+        if (customizer == null) {
+            throw new IllegalArgumentException("report table header text style customizer must not be null");
+        }
+        ReportTextRangeStyle style = new ReportTextRangeStyle();
+        customizer.accept(style);
+        table.setHeaderTextStyle(style);
+        return this;
+    }
+
+    /**
+     * 动态设置当前表格的表内容文本样式。
+     *
+     * @param customizer 表内容样式配置回调
+     * @return 当前构建器
+     */
+    public ReportTableBuilder bodyTextStyle(Consumer<ReportTextRangeStyle> customizer) {
+        if (customizer == null) {
+            throw new IllegalArgumentException("report table body text style customizer must not be null");
+        }
+        ReportTextRangeStyle style = new ReportTextRangeStyle();
+        customizer.accept(style);
+        table.setBodyTextStyle(style);
+        return this;
+    }
+
+    /**
+     * 添加矩形合并区域。行坐标包含表头，表头为第 {@code 0} 行。
+     *
+     * @param startRow 起始行
+     * @param startColumn 起始列
+     * @param rowSpan 跨行数
+     * @param columnSpan 跨列数
+     * @return 当前构建器
+     */
+    public ReportTableBuilder merge(int startRow, int startColumn, int rowSpan, int columnSpan) {
+        table.getMerges().add(new ReportTableMerge(startRow, startColumn, rowSpan, columnSpan));
         return this;
     }
 
@@ -54,8 +123,21 @@ public final class ReportTableBuilder {
      * @return 当前构建器
      */
     public ReportTableBuilder caption(String text, boolean autoNumbered) {
+        return caption(text, autoNumbered, CaptionPosition.BELOW);
+    }
+
+    /**
+     * 设置题注文本、编号方式和上下位置。
+     *
+     * @param text 题注文本
+     * @param autoNumbered 是否自动编号
+     * @param position 题注位于表格上方或下方
+     * @return 当前构建器
+     */
+    public ReportTableBuilder caption(String text, boolean autoNumbered, CaptionPosition position) {
         ReportCaption caption = new ReportCaption(CaptionTargetType.TABLE, text);
         caption.setAutoNumbered(autoNumbered);
+        caption.setPosition(position);
         table.setCaption(caption);
         return this;
     }

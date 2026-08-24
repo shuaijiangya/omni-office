@@ -14,6 +14,7 @@ public final class DiagramBlockSpec extends BlockSpec {
     private DiagramSpec definition;
     private String embedMode = "EDITABLE_VISIO";
     private String caption;
+    private String captionPosition = "BELOW";
     private Double maxWidthPoints;
     private Double maxHeightPoints;
 
@@ -47,6 +48,14 @@ public final class DiagramBlockSpec extends BlockSpec {
 
     public void setCaption(String caption) {
         this.caption = caption;
+    }
+
+    public String getCaptionPosition() {
+        return captionPosition;
+    }
+
+    public void setCaptionPosition(String captionPosition) {
+        this.captionPosition = captionPosition;
     }
 
     public Double getMaxWidthPoints() {

@@ -5,6 +5,7 @@ import cn.bugstack.application.artifact.DiagramArtifactStore;
 import cn.bugstack.application.artifact.ResolvedDiagramArtifact;
 import cn.bugstack.application.diagram.DiagramGenerationService;
 import cn.bugstack.export.document.CaptionTargetType;
+import cn.bugstack.export.document.CaptionPosition;
 import cn.bugstack.export.document.ReportCaption;
 import cn.bugstack.export.document.ReportDiagram;
 import cn.bugstack.export.document.ReportDiagramEmbedMode;
@@ -44,6 +45,7 @@ public final class DefaultDiagramBlockResolver implements DiagramBlockResolver {
         if (hasText(block.getCaption())) {
             ReportCaption caption = new ReportCaption(CaptionTargetType.IMAGE, block.getCaption().trim());
             caption.setAutoNumbered(true);
+            caption.setPosition(CaptionPosition.valueOf(block.getCaptionPosition()));
             diagram.setCaption(caption);
         }
         return diagram;

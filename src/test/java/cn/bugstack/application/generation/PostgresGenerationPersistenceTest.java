@@ -5,7 +5,6 @@ import cn.bugstack.application.generation.webhook.WebhookDeliveryRecord;
 import cn.bugstack.application.generation.webhook.WebhookDeliveryStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import javax.sql.DataSource;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.Set;
@@ -38,7 +39,7 @@ class PostgresGenerationPersistenceTest {
     void startPostgres() throws Exception {
         postgres = EmbeddedPostgres.builder().start();
         dataSource = postgres.getPostgresDatabase();
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        initializeTestSchema();
     }
 
     @BeforeEach
@@ -55,7 +56,7 @@ class PostgresGenerationPersistenceTest {
     }
 
     @Test
-    void migratesClaimsByLeaseAndCommitsTerminalOutboxAtomically() throws Exception {
+    void claimsByLeaseAndCommitsTerminalOutboxAtomically() throws Exception {
         PostgresGenerationJobRepository first = new PostgresGenerationJobRepository(dataSource, "tenant-a");
         PostgresGenerationJobRepository second = new PostgresGenerationJobRepository(dataSource, "tenant-a");
         PostgresGenerationJobRepository otherTenant = new PostgresGenerationJobRepository(
@@ -109,7 +110,7 @@ class PostgresGenerationPersistenceTest {
     }
 
     @Test
-    void productionProviderRunsMigrationsAndExposesReadiness() {
+    void productionProviderUsesExistingSchemaAndExposesReadiness() {
         try (PostgresGenerationJobRepositoryProvider provider =
                      new PostgresGenerationJobRepositoryProvider(
                              postgres.getJdbcUrl("postgres", "postgres"), "postgres", "postgres", 2)) {
@@ -173,6 +174,20 @@ class PostgresGenerationPersistenceTest {
             return true;
         } catch (GenerationQuotaExceededException expected) {
             return false;
+        }
+    }
+
+    /** 初始化仅供 PostgreSQL 集成测试使用的最终态表结构。 */
+    private void initializeTestSchema() throws Exception {
+        try (InputStream input = getClass().getResourceAsStream("/postgres/generation-schema.sql")) {
+            if (input == null) throw new IllegalStateException("missing PostgreSQL test schema");
+            String script = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            try (java.sql.Connection connection = dataSource.getConnection();
+                 java.sql.Statement statement = connection.createStatement()) {
+                for (String sql : script.split(";")) {
+                    if (!sql.isBlank()) statement.execute(sql);
+                }
+            }
         }
     }
 

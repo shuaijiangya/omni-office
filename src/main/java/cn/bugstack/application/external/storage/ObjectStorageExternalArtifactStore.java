@@ -64,6 +64,12 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
 
     @Override
     public ExternalArtifactReference store(byte[] content, String fileName, String mediaType) {
+        return storeForPrincipal(content, fileName, mediaType, "system");
+    }
+
+    @Override
+    public ExternalArtifactReference storeForPrincipal(byte[] content, String fileName, String mediaType,
+                                                       String ownerPrincipalId) {
         if (content == null || content.length == 0 || content.length > 100 * 1024 * 1024) {
             throw new IllegalArgumentException("artifact content size is invalid");
         }
@@ -71,11 +77,14 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
                 || mediaType == null || !mediaType.matches("[a-z0-9.+-]+/[a-zA-Z0-9.+-]+")) {
             throw new IllegalArgumentException("artifact metadata is invalid");
         }
+        if (ownerPrincipalId == null || !ownerPrincipalId.matches("[A-Za-z0-9._-]{1,64}")) {
+            throw new IllegalArgumentException("artifact owner principal id is invalid");
+        }
         scanner.scan(content, fileName, mediaType);
         String id = UUID.randomUUID().toString();
         Instant created = clock.instant();
         Metadata metadata = new Metadata(id, fileName, mediaType, content.length, sha256(content),
-                created, created.plus(retention));
+                created, created.plus(retention), ownerPrincipalId);
         try {
             storage.put(contentKey(id), content, mediaType);
             storage.put(metadataKey(id), mapper.writeValueAsBytes(metadata), "application/json");
@@ -87,6 +96,39 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
         }
     }
 
+    /** {@inheritDoc} */
+    @Override
+    public ExternalArtifactReference storeForPrincipal(Path contentPath, String fileName, String mediaType,
+                                                       String ownerPrincipalId) {
+        try {
+            long size = contentPath == null ? -1L : Files.size(contentPath);
+            if (!Files.isRegularFile(contentPath) || size < 1 || size > 100L * 1024 * 1024) {
+                throw new IllegalArgumentException("artifact file size is invalid");
+            }
+            if (fileName == null || !fileName.matches("[A-Za-z0-9._-]{1,128}")
+                    || mediaType == null || !mediaType.matches("[a-z0-9.+-]+/[a-zA-Z0-9.+-]+")
+                    || ownerPrincipalId == null || !ownerPrincipalId.matches("[A-Za-z0-9._-]{1,64}")) {
+                throw new IllegalArgumentException("artifact metadata is invalid");
+            }
+            scanner.scan(contentPath, fileName, mediaType);
+            String id = UUID.randomUUID().toString();
+            Instant created = clock.instant();
+            Metadata metadata = new Metadata(id, fileName, mediaType, size, sha256(contentPath),
+                    created, created.plus(retention), ownerPrincipalId);
+            try {
+                storage.put(contentKey(id), contentPath, mediaType);
+                storage.put(metadataKey(id), mapper.writeValueAsBytes(metadata), "application/json");
+                return reference(metadata);
+            } catch (IOException | RuntimeException e) {
+                storage.delete(contentKey(id));
+                storage.delete(metadataKey(id));
+                throw new IllegalStateException("failed to store object artifact", e);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("failed to inspect object artifact file", e);
+        }
+    }
+
     @Override
     public ResolvedExternalArtifact resolve(String resourceUri) {
         String id = id(resourceUri);
@@ -95,14 +137,18 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
             delete(resourceUri);
             throw new IllegalArgumentException("artifact expired");
         }
-        byte[] content = storage.get(contentKey(id));
-        if (content.length != metadata.size || !sha256(content).equals(metadata.sha256)) {
-            throw new IllegalStateException("object artifact integrity check failed");
-        }
         Path cache = cacheRoot.resolve(id + ".bin").normalize();
         if (!cacheRoot.equals(cache.getParent())) throw new IllegalStateException("object cache path escaped root");
-        try { Files.write(cache, content); }
-        catch (IOException e) { throw new IllegalStateException("failed to cache object artifact", e); }
+        try {
+            Files.deleteIfExists(cache);
+            storage.get(contentKey(id), cache);
+            if (Files.size(cache) != metadata.size || !sha256(cache).equals(metadata.sha256)) {
+                Files.deleteIfExists(cache);
+                throw new IllegalStateException("object artifact integrity check failed");
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("failed to cache object artifact", e);
+        }
         return new ResolvedExternalArtifact(reference(metadata), cache);
     }
 
@@ -150,7 +196,7 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
 
     private ExternalArtifactReference reference(Metadata value) {
         return new ExternalArtifactReference(value.id, URI_PREFIX + value.id, value.fileName, value.mediaType,
-                value.size, value.sha256, value.createdAt, value.expiresAt);
+                value.size, value.sha256, value.createdAt, value.expiresAt, value.ownerPrincipalId);
     }
 
     private String id(String uriValue) {
@@ -174,6 +220,20 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
         } catch (Exception e) { throw new IllegalStateException("SHA-256 is not available", e); }
     }
 
+    private String sha256(Path contentPath) throws IOException {
+        try (java.io.InputStream input = Files.newInputStream(contentPath)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) digest.update(buffer, 0, read);
+            StringBuilder result = new StringBuilder(64);
+            for (byte item : digest.digest()) result.append(String.format("%02x", item & 0xff));
+            return result.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
     /** 对象存储中持久化的工件元数据。 */
     public static final class Metadata {
         /** 工件 UUID。 */
@@ -190,13 +250,16 @@ public final class ObjectStorageExternalArtifactStore implements ExternalArtifac
         public Instant createdAt;
         /** 过期时间。 */
         public Instant expiresAt;
+        /** 所属主体 ID；旧版工件可能为空。 */
+        public String ownerPrincipalId;
 
         /** 供 Jackson 反序列化使用的构造器。 */
         public Metadata() { }
         Metadata(String id, String fileName, String mediaType, long size, String sha256,
-                 Instant createdAt, Instant expiresAt) {
+                 Instant createdAt, Instant expiresAt, String ownerPrincipalId) {
             this.id = id; this.fileName = fileName; this.mediaType = mediaType; this.size = size;
             this.sha256 = sha256; this.createdAt = createdAt; this.expiresAt = expiresAt;
+            this.ownerPrincipalId = ownerPrincipalId;
         }
     }
 }

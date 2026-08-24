@@ -1,5 +1,8 @@
 package cn.bugstack.export.document;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 报告中的段落内容。
  */
@@ -10,6 +13,12 @@ public class ReportParagraph implements ReportElement {
 
     /** 段落样式名称，例如正文、引用或说明。 */
     private String styleName;
+
+    /** 可选字体颜色，格式为 {@code #RRGGBB}。 */
+    private String fontColor;
+
+    /** 互相连续且可独立设置样式的文本范围。 */
+    private List<ReportTextRange> textRanges = new ArrayList<>();
 
     /**
      * 创建空段落，供序列化框架使用。
@@ -70,5 +79,31 @@ public class ReportParagraph implements ReportElement {
      */
     public void setStyleName(String styleName) {
         this.styleName = styleName;
+    }
+
+    public String getFontColor() {
+        return fontColor;
+    }
+
+    public void setFontColor(String fontColor) {
+        this.fontColor = fontColor;
+    }
+
+    /**
+     * 获取有序文本范围。
+     *
+     * @return 文本范围列表
+     */
+    public List<ReportTextRange> getTextRanges() {
+        return textRanges;
+    }
+
+    /**
+     * 设置有序文本范围。
+     *
+     * @param textRanges 文本范围列表
+     */
+    public void setTextRanges(List<ReportTextRange> textRanges) {
+        this.textRanges = textRanges == null ? new ArrayList<>() : textRanges;
     }
 }

@@ -1,15 +1,17 @@
 package cn.bugstack.protocol.document.block;
 
 /**
- * 图片块。当前使用受信任应用解析后的图片来源；通用图片 artifactId 将在后续工件能力中扩展。
+ * 图片块。内部调用可使用受信路径，外部协议应使用租户隔离的 {@code assetId}。
  */
 public final class ImageBlockSpec extends BlockSpec {
 
     private String source;
+    private String assetId;
     private String alternativeText;
     private Integer width;
     private Integer height;
     private String caption;
+    private String captionPosition = "BELOW";
 
     public String getSource() {
         return source;
@@ -17,6 +19,14 @@ public final class ImageBlockSpec extends BlockSpec {
 
     public void setSource(String source) {
         this.source = source;
+    }
+
+    public String getAssetId() {
+        return assetId;
+    }
+
+    public void setAssetId(String assetId) {
+        this.assetId = assetId;
     }
 
     public String getAlternativeText() {
@@ -49,5 +59,13 @@ public final class ImageBlockSpec extends BlockSpec {
 
     public void setCaption(String caption) {
         this.caption = caption;
+    }
+
+    public String getCaptionPosition() {
+        return captionPosition;
+    }
+
+    public void setCaptionPosition(String captionPosition) {
+        this.captionPosition = captionPosition;
     }
 }

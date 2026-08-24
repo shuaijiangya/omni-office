@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DefaultDynamicDocumentExporterTest {
@@ -36,6 +37,10 @@ class DefaultDynamicDocumentExporterTest {
         assertTrue(word.getText().contains("DocumentSpec 完整能力示例"));
         assertTrue(word.getText().contains("结构化内容"));
         assertTrue(word.getText().contains("递归章节"));
+        assertTrue(word.getText().contains("首次发布"));
+        assertTrue(word.getText().contains("Reviewer"));
+        assertEquals(54D, word.getFirstSection().getPageSetup().getLeftMargin(), 0.1D);
+        assertEquals(54D, word.getFirstSection().getPageSetup().getRightMargin(), 0.1D);
     }
 
     @Test

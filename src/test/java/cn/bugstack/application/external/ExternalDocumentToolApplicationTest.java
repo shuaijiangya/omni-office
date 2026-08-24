@@ -24,7 +24,7 @@ class ExternalDocumentToolApplicationTest {
         ExternalDocumentToolApplication application = application("external-tools-catalog");
         registerAssessmentTemplate(application);
 
-        assertEquals(5, application.listTools().size());
+        assertEquals(8, application.listTools().size());
         ExternalToolDefinition documentTool = application.listTools().stream()
                 .filter(tool -> ExternalDocumentToolApplication.EXPORT_DOCUMENT.equals(tool.getName()))
                 .findFirst().orElseThrow(AssertionError::new);
@@ -139,13 +139,34 @@ class ExternalDocumentToolApplicationTest {
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> application.call(ExternalDocumentToolApplication.EXPORT_DOCUMENT, document));
-        assertTrue(error.getMessage().contains("EXTERNAL_IMAGE_NOT_ALLOWED"));
+        assertTrue(error.getMessage().contains("EXTERNAL_IMAGE_SOURCE_NOT_ALLOWED"));
         ExternalToolDefinition tool = application.listTools().stream()
                 .filter(item -> ExternalDocumentToolApplication.EXPORT_DOCUMENT.equals(item.getName()))
                 .findFirst().orElseThrow();
-        assertTrue(java.util.stream.StreamSupport.stream(tool.getInputSchema().path("$defs")
-                        .path("block").path("oneOf").spliterator(), false)
-                .noneMatch(item -> "#/$defs/imageBlock".equals(item.path("$ref").asText())));
+        JsonNode imageSchema = tool.getInputSchema().path("$defs").path("imageBlock");
+        assertEquals("string", imageSchema.path("properties").path("assetId").path("type").asText());
+        assertTrue(!imageSchema.path("properties").has("source"));
+    }
+
+    @Test
+    void storesReadsAndDeletesPrincipalOwnedManagedImageAssets() throws Exception {
+        ExternalDocumentToolApplication application = application("external-tools-assets");
+        ObjectNode upload = mapper.createObjectNode();
+        upload.put("fileName", "pixel.png");
+        upload.put("mediaType", "image/png");
+        upload.put("contentBase64", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        ExternalToolResult stored = application.call(
+                ExternalDocumentToolApplication.STORE_ASSET, upload, "alice");
+        String assetId = stored.getStructuredContent().path("assetId").asText();
+        assertTrue(assetId.matches("[0-9a-f-]{36}"));
+
+        ObjectNode key = mapper.createObjectNode().put("assetId", assetId);
+        assertEquals(assetId, application.call(ExternalDocumentToolApplication.GET_ASSET, key, "alice")
+                .getStructuredContent().path("assetId").asText());
+        assertThrows(IllegalArgumentException.class,
+                () -> application.call(ExternalDocumentToolApplication.GET_ASSET, key, "bob"));
+        assertTrue(application.call(ExternalDocumentToolApplication.DELETE_ASSET, key, "alice")
+                .getStructuredContent().path("deleted").asBoolean());
     }
 
     private ExternalDocumentToolApplication application(String prefix) throws Exception {

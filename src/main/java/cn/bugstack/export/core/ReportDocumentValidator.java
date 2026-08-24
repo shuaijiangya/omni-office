@@ -10,6 +10,9 @@ import cn.bugstack.export.document.ReportListItem;
 import cn.bugstack.export.document.ReportParagraph;
 import cn.bugstack.export.document.ReportSection;
 import cn.bugstack.export.document.ReportTable;
+import cn.bugstack.export.document.ReportTableMerge;
+import cn.bugstack.export.document.ReportTextRange;
+import cn.bugstack.export.document.ReportTextRangeStyle;
 
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -74,13 +77,15 @@ public final class ReportDocumentValidator {
             } else if (element instanceof ReportSection) {
                 validateSection((ReportSection) element, depth + 1, elementPath, errors);
             } else if (element instanceof ReportParagraph) {
-                if (!hasText(((ReportParagraph) element).getText())) {
-                    errors.add("report paragraph text must not be blank at " + elementPath);
-                }
+                ReportParagraph paragraph = (ReportParagraph) element;
+                validateParagraph(paragraph, elementPath, errors);
+                validateFontColor(paragraph.getFontColor(), elementPath, errors);
             } else if (element instanceof ReportListItem) {
-                if (!hasText(((ReportListItem) element).getText())) {
+                ReportListItem item = (ReportListItem) element;
+                if (!hasText(item.getText())) {
                     errors.add("report list item text must not be blank at " + elementPath);
                 }
+                validateFontColor(item.getFontColor(), elementPath, errors);
             } else if (element instanceof ReportTable) {
                 validateTable((ReportTable) element, elementPath, errors);
             } else if (element instanceof ReportImage) {
@@ -108,6 +113,45 @@ public final class ReportDocumentValidator {
                 }
             }
         }
+    }
+
+    /** 校验 Report 段落的单文本或多文本范围内容。 */
+    private void validateParagraph(ReportParagraph paragraph, String path, List<String> errors) {
+        boolean hasSingleText = hasText(paragraph.getText());
+        boolean hasRanges = paragraph.getTextRanges() != null && !paragraph.getTextRanges().isEmpty();
+        if (hasSingleText == hasRanges) {
+            errors.add("report paragraph must configure exactly one of text and textRanges at " + path);
+            return;
+        }
+        if (hasSingleText) return;
+        for (int index = 0; index < paragraph.getTextRanges().size(); index++) {
+            ReportTextRange range = paragraph.getTextRanges().get(index);
+            String rangePath = path + "/textRange[" + index + "]";
+            if (range == null || !hasText(range.getText())) {
+                errors.add("report text range must not be null or blank at " + rangePath);
+                continue;
+            }
+            validateTextRangeStyle(range.getStyle(), rangePath, errors);
+        }
+    }
+
+    /** 校验 Report 文本范围样式。 */
+    private void validateTextRangeStyle(ReportTextRangeStyle style, String path, List<String> errors) {
+        if (style == null) return;
+        if (style.getFontFamily() != null && !hasText(style.getFontFamily())) {
+            errors.add("report text range font family must not be blank at " + path);
+        }
+        if (style.getAsciiFontFamily() != null && !hasText(style.getAsciiFontFamily())) {
+            errors.add("report text range ASCII font family must not be blank at " + path);
+        }
+        if (style.getFarEastFontFamily() != null && !hasText(style.getFarEastFontFamily())) {
+            errors.add("report text range Far East font family must not be blank at " + path);
+        }
+        if (style.getFontSize() != null && (!Double.isFinite(style.getFontSize())
+                || style.getFontSize() < 1 || style.getFontSize() > 200)) {
+            errors.add("report text range font size must be between 1 and 200 at " + path);
+        }
+        validateFontColor(style.getFontColor(), path, errors);
     }
 
     private void validateDiagram(ReportDiagram diagram, String path, List<String> errors) {
@@ -139,11 +183,9 @@ public final class ReportDocumentValidator {
             errors.add("report table headers must not be empty at " + path);
             return;
         }
-        for (int columnIndex = 0; columnIndex < columnCount; columnIndex++) {
-            if (!hasText(table.getHeaders().get(columnIndex))) {
-                errors.add("report table header must not be blank at " + path + "/header[" + columnIndex + "]");
-            }
-        }
+        validateFontColor(table.getFontColor(), path, errors);
+        validateTextRangeStyle(table.getHeaderTextStyle(), path + "/headerTextStyle", errors);
+        validateTextRangeStyle(table.getBodyTextStyle(), path + "/bodyTextStyle", errors);
         if (table.getColumnWidths().length > 0 && table.getColumnWidths().length != columnCount) {
             errors.add("report table width count must match header count at " + path);
         }
@@ -157,6 +199,72 @@ public final class ReportDocumentValidator {
             if (table.getRows().get(rowIndex) == null || table.getRows().get(rowIndex).size() != columnCount) {
                 errors.add("report table row width must match header count at " + path + "/row[" + rowIndex + "]");
             }
+        }
+        boolean[][] covered = new boolean[table.getRows().size() + 1][columnCount];
+        boolean[][] anchors = new boolean[table.getRows().size() + 1][columnCount];
+        for (int mergeIndex = 0; mergeIndex < table.getMerges().size(); mergeIndex++) {
+            ReportTableMerge merge = table.getMerges().get(mergeIndex);
+            if (merge == null
+                    || merge.getStartRow() + merge.getRowSpan() > covered.length
+                    || merge.getStartColumn() + merge.getColumnSpan() > columnCount) {
+                errors.add("report table merge exceeds table boundary at " + path + "/merge[" + mergeIndex + "]");
+                continue;
+            }
+            boolean overlaps = false;
+            for (int row = merge.getStartRow(); row < merge.getStartRow() + merge.getRowSpan(); row++) {
+                for (int column = merge.getStartColumn();
+                     column < merge.getStartColumn() + merge.getColumnSpan(); column++) {
+                    overlaps |= covered[row][column];
+                }
+            }
+            if (overlaps) {
+                errors.add("report table merges must not overlap at " + path + "/merge[" + mergeIndex + "]");
+                continue;
+            }
+            for (int row = merge.getStartRow(); row < merge.getStartRow() + merge.getRowSpan(); row++) {
+                for (int column = merge.getStartColumn();
+                     column < merge.getStartColumn() + merge.getColumnSpan(); column++) {
+                    covered[row][column] = true;
+                }
+            }
+            anchors[merge.getStartRow()][merge.getStartColumn()] = true;
+        }
+        for (int column = 0; column < columnCount; column++) {
+            validateReportTableCell(table.getHeaders().get(column), 0, column,
+                    path + "/header[" + column + "]", true, covered, anchors, errors);
+        }
+        for (int row = 0; row < table.getRows().size(); row++) {
+            List<String> values = table.getRows().get(row);
+            if (values == null || values.size() != columnCount) {
+                continue;
+            }
+            for (int column = 0; column < columnCount; column++) {
+                validateReportTableCell(values.get(column), row + 1, column,
+                        path + "/row[" + row + "]/cell[" + column + "]", false,
+                        covered, anchors, errors);
+            }
+        }
+    }
+
+    /** 校验 Report 层表格单元格及合并后续内容。 */
+    private void validateReportTableCell(String value, int row, int column, String path, boolean header,
+                                         boolean[][] covered, boolean[][] anchors, List<String> errors) {
+        boolean follower = covered[row][column] && !anchors[row][column];
+        if (follower) {
+            if (hasText(value)) {
+                errors.add("merged report table cell must be blank at " + path);
+            }
+            return;
+        }
+        if (value == null || (header && !hasText(value))) {
+            errors.add("report table cell must not be null or blank at " + path);
+        }
+    }
+
+    /** 校验可选字体颜色。 */
+    private void validateFontColor(String color, String path, List<String> errors) {
+        if (hasText(color) && !color.matches("#[0-9A-Fa-f]{6}")) {
+            errors.add("report font color must use #RRGGBB format at " + path);
         }
     }
 

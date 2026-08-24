@@ -1,5 +1,6 @@
 package cn.bugstack.application.external.mcp;
 
+import cn.bugstack.application.concurrent.BoundedExecutors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -14,10 +15,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Supplier;
 
 /** MCP 2025-11-25 实验性 Tasks 状态机。实例本身即授权上下文边界。 */
@@ -28,7 +30,8 @@ final class McpTaskManager implements AutoCloseable {
     private static final long POLL_INTERVAL = 1_000L;
     private final ObjectMapper mapper;
     private final Clock clock;
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
+    private final ExecutorService executor = BoundedExecutors.fixed(2, 100,
+            "omni-mcp-task", new ThreadPoolExecutor.AbortPolicy());
     private final ConcurrentMap<String, TaskRecord> tasks = new ConcurrentHashMap<>();
 
     McpTaskManager(ObjectMapper mapper) {
@@ -47,7 +50,12 @@ final class McpTaskManager implements AutoCloseable {
         Instant now = clock.instant();
         TaskRecord task = new TaskRecord(UUID.randomUUID().toString(), now, ttl);
         tasks.put(task.id, task);
-        task.future = executor.submit(() -> execute(task, operation));
+        try {
+            task.future = executor.submit(() -> execute(task, operation));
+        } catch (RejectedExecutionException capacityExceeded) {
+            tasks.remove(task.id, task);
+            throw new IllegalStateException("MCP task queue capacity is exhausted", capacityExceeded);
+        }
         ObjectNode result = mapper.createObjectNode();
         result.set("task", taskNode(task));
         ObjectNode metadata = result.putObject("_meta");

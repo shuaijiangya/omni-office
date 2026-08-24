@@ -66,10 +66,15 @@
     "layout": {
       "styleProfile": "DEFAULT",
       "headingNumberingEnabled": true,
-      "bodyTitleEnabled": true,
+      "bodyTitleEnabled": false,
       "tableOfContentsDepth": 3,
       "pageNumberFooterEnabled": true,
       "bodyPageNumberStart": 1
+    },
+    "cover": {
+      "documentName": "{{project.name}}评估报告",
+      "projectName": "{{project.name}}",
+      "version": "V1.0"
     },
     "sections": [
       {

@@ -43,6 +43,8 @@ public final class McpJsonRpcServer implements AutoCloseable {
     private final Set<String> supportedVersions = new HashSet<>();
     private final McpTaskManager taskManager;
     private final boolean authenticatedContext;
+    private final String principalId;
+    private final boolean allowAnyArtifacts;
     private boolean initializeResponded;
     private boolean initialized;
     private String negotiatedVersion;
@@ -52,7 +54,20 @@ public final class McpJsonRpcServer implements AutoCloseable {
     }
 
     public McpJsonRpcServer(ExternalDocumentToolApplication application, boolean authenticatedContext) {
-        this(application, new ObjectMapper(), authenticatedContext);
+        this(application, new ObjectMapper(), authenticatedContext, "system", false);
+    }
+
+    /**
+     * 创建绑定认证主体的 MCP 会话，工具生成和资源读取都会执行主体级工件授权。
+     *
+     * @param application 外部工具应用
+     * @param authenticatedContext 是否为认证上下文
+     * @param principalId 当前主体 ID
+     * @param allowAnyArtifacts 是否允许读取租户内任意主体工件
+     */
+    public McpJsonRpcServer(ExternalDocumentToolApplication application, boolean authenticatedContext,
+                            String principalId, boolean allowAnyArtifacts) {
+        this(application, new ObjectMapper(), authenticatedContext, principalId, allowAnyArtifacts);
     }
 
     public synchronized String getNegotiatedVersion() {
@@ -69,13 +84,23 @@ public final class McpJsonRpcServer implements AutoCloseable {
 
     McpJsonRpcServer(ExternalDocumentToolApplication application, ObjectMapper mapper,
                      boolean authenticatedContext) {
+        this(application, mapper, authenticatedContext, "system", false);
+    }
+
+    McpJsonRpcServer(ExternalDocumentToolApplication application, ObjectMapper mapper,
+                     boolean authenticatedContext, String principalId, boolean allowAnyArtifacts) {
         if (application == null || mapper == null) {
             throw new IllegalArgumentException("MCP application and mapper are required");
+        }
+        if (principalId == null || !principalId.matches("[A-Za-z0-9._-]{1,64}")) {
+            throw new IllegalArgumentException("MCP principal id is invalid");
         }
         this.application = application;
         this.mapper = mapper.copy();
         this.taskManager = new McpTaskManager(this.mapper);
         this.authenticatedContext = authenticatedContext;
+        this.principalId = principalId;
+        this.allowAnyArtifacts = allowAnyArtifacts;
         supportedVersions.add(LATEST_PROTOCOL_VERSION);
         supportedVersions.add("2025-06-18");
     }
@@ -248,7 +273,7 @@ public final class McpJsonRpcServer implements AutoCloseable {
         JsonNode arguments = params.has("arguments") ? params.path("arguments") : mapper.createObjectNode();
         final ExternalToolResult toolResult;
         try {
-            toolResult = application.call(name, arguments);
+            toolResult = application.call(name, arguments, principalId);
         } catch (UnknownExternalToolException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -345,7 +370,7 @@ public final class McpJsonRpcServer implements AutoCloseable {
         String uri = params.path("uri").asText();
         final ResolvedExternalArtifact artifact;
         try {
-            artifact = application.readResource(uri);
+            artifact = application.readResource(uri, principalId, allowAnyArtifacts);
         } catch (RuntimeException e) {
             ObjectNode data = mapper.createObjectNode().put("uri", uri);
             return error(id, RESOURCE_NOT_FOUND, "Resource not found", data);

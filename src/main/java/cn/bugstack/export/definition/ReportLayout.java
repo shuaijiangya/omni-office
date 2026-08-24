@@ -1,6 +1,11 @@
 package cn.bugstack.export.definition;
 
 import cn.bugstack.office.docx.style.StyleProfile;
+import cn.bugstack.office.docx.model.DocxPageOrientation;
+import cn.bugstack.office.docx.model.DocxPaperSize;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * 报告的版式和前置页配置。
@@ -40,6 +45,14 @@ public final class ReportLayout {
     private final String coverVersion;
     /** 可动态组合内容的封面模板。 */
     private final ReportCoverTemplate coverTemplate;
+    private final DocxPaperSize paperSize;
+    private final DocxPageOrientation orientation;
+    private final double topMarginPoints;
+    private final double rightMarginPoints;
+    private final double bottomMarginPoints;
+    private final double leftMarginPoints;
+    private final List<ReportRevisionEntry> revisions;
+    private final List<ReportApprovalEntry> approvals;
 
     private ReportLayout(Builder builder) {
         this.styleProfile = builder.styleProfile;
@@ -55,6 +68,14 @@ public final class ReportLayout {
         this.coverProjectName = builder.coverProjectName;
         this.coverVersion = builder.coverVersion;
         this.coverTemplate = builder.coverTemplate;
+        this.paperSize = builder.paperSize;
+        this.orientation = builder.orientation;
+        this.topMarginPoints = builder.topMarginPoints;
+        this.rightMarginPoints = builder.rightMarginPoints;
+        this.bottomMarginPoints = builder.bottomMarginPoints;
+        this.leftMarginPoints = builder.leftMarginPoints;
+        this.revisions = Collections.unmodifiableList(new ArrayList<>(builder.revisions));
+        this.approvals = Collections.unmodifiableList(new ArrayList<>(builder.approvals));
     }
 
     /**
@@ -85,9 +106,11 @@ public final class ReportLayout {
     }
 
     /**
-     * 判断是否在模块正文开始位置输出报告主标题。
+     * 判断是否在无目录文档的正文开始位置输出报告主标题。
      *
-     * @return 输出时返回 {@code true}
+     * <p>启用目录时，编译器不会在目录与模块正文之间插入报告主标题。</p>
+     *
+     * @return 请求输出正文主标题时返回 {@code true}
      */
     public boolean isBodyTitleEnabled() {
         return bodyTitleEnabled;
@@ -183,6 +206,15 @@ public final class ReportLayout {
         return coverTemplate;
     }
 
+    public DocxPaperSize getPaperSize() { return paperSize; }
+    public DocxPageOrientation getOrientation() { return orientation; }
+    public double getTopMarginPoints() { return topMarginPoints; }
+    public double getRightMarginPoints() { return rightMarginPoints; }
+    public double getBottomMarginPoints() { return bottomMarginPoints; }
+    public double getLeftMarginPoints() { return leftMarginPoints; }
+    public List<ReportRevisionEntry> getRevisions() { return revisions; }
+    public List<ReportApprovalEntry> getApprovals() { return approvals; }
+
     /** 报告版式构建器。 */
     public static final class Builder {
 
@@ -191,7 +223,7 @@ public final class ReportLayout {
         /** 待构建布局是否启用标题编号。 */
         private boolean headingNumberingEnabled = true;
         /** 待构建布局是否输出正文主标题。 */
-        private boolean bodyTitleEnabled = true;
+        private boolean bodyTitleEnabled;
         /** 待构建布局的目录层级。 */
         private Integer tableOfContentsDepth;
         /** 待构建布局的页眉文本。 */
@@ -212,6 +244,14 @@ public final class ReportLayout {
         private String coverVersion;
         /** 待构建布局的动态封面模板。 */
         private ReportCoverTemplate coverTemplate;
+        private DocxPaperSize paperSize = DocxPaperSize.A4;
+        private DocxPageOrientation orientation = DocxPageOrientation.PORTRAIT;
+        private double topMarginPoints = 72D;
+        private double rightMarginPoints = 72D;
+        private double bottomMarginPoints = 72D;
+        private double leftMarginPoints = 72D;
+        private final List<ReportRevisionEntry> revisions = new ArrayList<>();
+        private final List<ReportApprovalEntry> approvals = new ArrayList<>();
 
         /**
          * 设置报告样式画像。
@@ -239,7 +279,9 @@ public final class ReportLayout {
         }
 
         /**
-         * 设置是否在模块正文开始位置输出报告主标题，默认输出。
+         * 设置是否在无目录文档的正文开始位置输出报告主标题，默认不输出。
+         *
+         * <p>启用目录时该选项不会在目录与模块正文之间插入额外标题。</p>
          *
          * @param enabled 是否输出正文主标题
          * @return 当前构建器
@@ -357,6 +399,34 @@ public final class ReportLayout {
             return this;
         }
 
+        /** 设置页面纸张、方向及四边页边距，单位为 point。 */
+        public Builder pageSetup(DocxPaperSize paperSize, DocxPageOrientation orientation,
+                                 double top, double right, double bottom, double left) {
+            if (paperSize == null || orientation == null || !validMargin(top) || !validMargin(right)
+                    || !validMargin(bottom) || !validMargin(left)) {
+                throw new IllegalArgumentException("report page setup is invalid");
+            }
+            this.paperSize = paperSize;
+            this.orientation = orientation;
+            this.topMarginPoints = top;
+            this.rightMarginPoints = right;
+            this.bottomMarginPoints = bottom;
+            this.leftMarginPoints = left;
+            return this;
+        }
+
+        /** 追加修订记录前置页条目。 */
+        public Builder revision(String version, String date, String description, String author) {
+            revisions.add(new ReportRevisionEntry(version, date, description, author));
+            return this;
+        }
+
+        /** 追加审批签署页条目。 */
+        public Builder approval(String role, String person, String date) {
+            approvals.add(new ReportApprovalEntry(role, person, date));
+            return this;
+        }
+
         /**
          * 校验并创建不可变报告版式。
          *
@@ -384,6 +454,10 @@ public final class ReportLayout {
          */
         private boolean hasText(String value) {
             return value != null && !value.trim().isEmpty();
+        }
+
+        private boolean validMargin(double value) {
+            return Double.isFinite(value) && value >= 0D && value <= 288D;
         }
     }
 }

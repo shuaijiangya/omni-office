@@ -2,12 +2,17 @@
   "schemaVersion": "1.0",
   "outputFormats": ["DOCX", "PDF", "HTML"],
   "styleProfiles": ["DEFAULT", "BUSINESS_BRIEF", "GJB_438C"],
+  "frontMatter": ["standardCover", "revisionHistory", "approvalPage"],
+  "pageSetup": ["paperSize", "orientation", "margins"],
+  "textFormatting": ["fontColor", "textRanges", "fontFamily", "asciiFontFamily", "farEastFontFamily", "fontSize", "bold", "italic", "underline"],
+  "tableFormatting": ["responsivePageWidth", "columnWidthWeights", "centeredCellTextByDefault", "headerTextStyle", "bodyTextStyle", "alignment", "merges"],
+  "captionPositions": ["ABOVE", "BELOW"],
   "blocks": [
     { "type": "paragraph", "renderable": true },
     { "type": "bulletList", "renderable": true },
     { "type": "numberedList", "renderable": true },
     { "type": "table", "renderable": true },
-    { "type": "image", "renderable": true },
+    { "type": "image", "renderable": true, "externalInput": "managed assetId" },
     { "type": "subsection", "renderable": true },
     { "type": "pageBreak", "renderable": true },
     {

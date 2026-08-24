@@ -1,0 +1,31 @@
+name: quality-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Resolve local proprietary compile dependencies
+        env:
+          ASPOSE_WORDS_JAR_URL: ${{ secrets.ASPOSE_WORDS_JAR_URL }}
+          ASPOSE_DIAGRAM_JAR_URL: ${{ secrets.ASPOSE_DIAGRAM_JAR_URL }}
+          ASPOSE_ARTIFACT_TOKEN: ${{ secrets.ASPOSE_ARTIFACT_TOKEN }}
+        run: scripts/bootstrap-aspose.sh
+      - name: Run release quality gate
+        env:
+          MAVEN_BIN: mvn
+        run: scripts/release-check.sh
