@@ -6,6 +6,9 @@ Omni Office 是一个面向 Java 应用的 Office 文档生成与报告编排项
 Function Calling/MCP 服务。三类入口最终都收敛到受校验的报告语义模型和统一导出链路，输出
 DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 export 业务模板。
 
+> 快速了解当前项目已经实现的功能、适用场景和可运行代码，请查看
+> **[功能总览与针对性示例](docs/project-capabilities-and-examples.md)**。
+
 ## 核心特性
 
 - 使用强类型业务对象实现报告模块，不需要把所有模块数据硬编码为 `String`。
