@@ -8,6 +8,9 @@ DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 
 
 > 快速了解当前项目已经实现的功能、适用场景和可运行代码，请查看
 > **[功能总览与针对性示例](docs/project-capabilities-and-examples.md)**。
+>
+> 长期使用 Aspose.Words 的项目可直接参考
+> **[Aspose.Words 到 omni-office 迁移对照指南](docs/aspose-words-migration-guide.md)**。
 
 ## 核心特性
 
@@ -1118,6 +1121,9 @@ java -cp "target/classes:lib/*" \
   cn.bugstack.export.example.ChartCapabilitiesReportExportExample
 
 java -cp "target/classes:lib/*" \
+  cn.bugstack.export.example.AsposeWordsMigrationComparisonExample
+
+java -cp "target/classes:lib/*" \
   cn.bugstack.office.docx.example.ParagraphChartCapabilitiesExample
 
 java -cp "target/classes:lib/*" \
@@ -1137,6 +1143,7 @@ Windows 请把 classpath 中的 `:` 替换为 `;`。
 | `AssessmentReportExportExample` | 使用通用定义、模块计划和语义文档生成评估报告 |
 | `FormattingCapabilitiesReportExportExample` | 同段多文本样式、页面自适应表格、默认居中、合并与题注位置 |
 | `ChartCapabilitiesReportExportExample` | 柱状图、饼图、多系列及横向单指标单样本对比图、折线图和雷达图 |
+| `AsposeWordsMigrationComparisonExample` | 共享同一业务输入的 Aspose.Words 原生写法与 omni-office 框架写法对照 |
 | `ParagraphChartCapabilitiesExample` | 使用 `section.paragraph().chart(...)` 构建五种原生图表 |
 | `DocxWrapperExample` | 封面、修订记录、审批页、目录、列表、图片、题注、表格和类设计表格 |
 | `EditableVisioWordExample` | Word 中的 Visio 预览和可编辑 Visio 文件 |
