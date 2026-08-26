@@ -10,6 +10,8 @@ import cn.bugstack.protocol.document.DocumentSpecVersion;
 import cn.bugstack.protocol.document.SectionSpec;
 import cn.bugstack.protocol.document.block.AbstractListBlockSpec;
 import cn.bugstack.protocol.document.block.BlockSpec;
+import cn.bugstack.protocol.document.block.ChartBlockSpec;
+import cn.bugstack.protocol.document.block.ChartSeriesSpec;
 import cn.bugstack.protocol.document.block.DiagramBlockSpec;
 import cn.bugstack.protocol.document.block.ImageBlockSpec;
 import cn.bugstack.protocol.document.block.PageBreakBlockSpec;
@@ -43,6 +45,10 @@ public final class DocumentSpecValidator {
             "LEFT", "CENTER", "RIGHT"));
     private static final Set<String> CAPTION_POSITIONS = new HashSet<>(Arrays.asList(
             "ABOVE", "BELOW"));
+    private static final Set<String> CHART_TYPES = new HashSet<>(Arrays.asList(
+            "COLUMN", "BAR", "PIE", "LINE", "RADAR"));
+    private static final Set<String> CHART_LEGEND_POSITIONS = new HashSet<>(Arrays.asList(
+            "BOTTOM", "TOP", "LEFT", "RIGHT"));
 
     private final DocumentSpecLimits limits;
     private final boolean diagramEnabled;
@@ -224,6 +230,9 @@ public final class DocumentSpecValidator {
             } else if (block instanceof DiagramBlockSpec) {
                 countMedia(blockPath, state);
                 validateDiagram((DiagramBlockSpec) block, blockPath, state);
+            } else if (block instanceof ChartBlockSpec) {
+                countMedia(blockPath, state);
+                validateChart((ChartBlockSpec) block, blockPath, state);
             } else if (block instanceof SubsectionBlockSpec) {
                 SubsectionBlockSpec subsection = (SubsectionBlockSpec) block;
                 SectionSpec child = new SectionSpec(subsection.getTitle());
@@ -484,6 +493,86 @@ public final class DocumentSpecValidator {
         if (!diagramEnabled) {
             state.add(path, "CAPABILITY_NOT_AVAILABLE",
                     "diagram blocks require an explicitly configured diagram artifact capability");
+        }
+    }
+
+    /** 校验 Word 原生图表数据矩阵及各图表类型的明确边界。 */
+    private void validateChart(ChartBlockSpec chart, String path, ValidationState state) {
+        validateEnum(chart.getChartType(), CHART_TYPES, path + "/chartType",
+                "chartType must be COLUMN, BAR, PIE, LINE or RADAR", state);
+        validateEnum(chart.getLegendPosition(), CHART_LEGEND_POSITIONS, path + "/legendPosition",
+                "legendPosition must be BOTTOM, TOP, LEFT or RIGHT", state);
+        validateEnum(chart.getCaptionPosition(), CAPTION_POSITIONS, path + "/captionPosition",
+                "captionPosition must be ABOVE or BELOW", state);
+        validateText(chart.getTitle(), path + "/title", false, state);
+        validateText(chart.getCategoryAxisTitle(), path + "/categoryAxisTitle", false, state);
+        validateText(chart.getValueAxisTitle(), path + "/valueAxisTitle", false, state);
+        validateText(chart.getCaption(), path + "/caption", false, state);
+        if (!Double.isFinite(chart.getWidthPoints()) || !Double.isFinite(chart.getHeightPoints())
+                || chart.getWidthPoints() < 100D || chart.getWidthPoints() > 1000D
+                || chart.getHeightPoints() < 100D || chart.getHeightPoints() > 1000D) {
+            state.add(path, "OUT_OF_RANGE", "chart width and height must be between 100 and 1000 points");
+        }
+        List<String> categories = chart.getCategories();
+        if (categories == null || categories.isEmpty()) {
+            state.add(path + "/categories", "REQUIRED", "chart categories must not be empty");
+            return;
+        }
+        if (categories.size() > 100) {
+            state.add(path + "/categories", "LIMIT_EXCEEDED", "chart category count exceeds 100");
+        }
+        for (int index = 0; index < categories.size(); index++) {
+            validateText(categories.get(index), path + "/categories/" + index, true, state);
+        }
+        List<ChartSeriesSpec> series = chart.getSeries();
+        if (series == null || series.isEmpty()) {
+            state.add(path + "/series", "REQUIRED", "chart series must not be empty");
+            return;
+        }
+        if (series.size() > 20) {
+            state.add(path + "/series", "LIMIT_EXCEEDED", "chart series count exceeds 20");
+        }
+        boolean pieValuesValid = true;
+        double pieTotal = 0D;
+        for (int seriesIndex = 0; seriesIndex < series.size(); seriesIndex++) {
+            ChartSeriesSpec item = series.get(seriesIndex);
+            String seriesPath = path + "/series/" + seriesIndex;
+            if (item == null) {
+                state.add(seriesPath, "REQUIRED", "chart series must not be null");
+                continue;
+            }
+            validateText(item.getName(), seriesPath + "/name", false, state);
+            if (item.getValues() == null || item.getValues().size() != categories.size()) {
+                state.add(seriesPath + "/values", "COLUMN_MISMATCH",
+                        "chart series value count must match category count");
+                continue;
+            }
+            for (int valueIndex = 0; valueIndex < item.getValues().size(); valueIndex++) {
+                Double value = item.getValues().get(valueIndex);
+                if (value == null || !Double.isFinite(value)) {
+                    state.add(seriesPath + "/values/" + valueIndex, "OUT_OF_RANGE",
+                            "chart value must be a finite number");
+                    pieValuesValid = false;
+                } else if ("PIE".equals(chart.getChartType())) {
+                    pieTotal += value;
+                    pieValuesValid &= value >= 0D;
+                }
+            }
+        }
+        if ("PIE".equals(chart.getChartType()) && series.size() != 1) {
+            state.add(path + "/series", "INVALID_CHART_DATA", "pie chart must contain exactly one series");
+        }
+        if ("PIE".equals(chart.getChartType()) && (!pieValuesValid || pieTotal <= 0D)) {
+            state.add(path + "/series", "INVALID_CHART_DATA",
+                    "pie chart values must be non-negative and have a positive total");
+        }
+        if (chart.isShowPercentages() && !"PIE".equals(chart.getChartType())) {
+            state.add(path + "/showPercentages", "INVALID_CHART_OPTION",
+                    "showPercentages is supported only for PIE charts");
+        }
+        if ("RADAR".equals(chart.getChartType()) && categories.size() < 3) {
+            state.add(path + "/categories", "INVALID_CHART_DATA",
+                    "radar chart must contain at least three categories");
         }
     }
 

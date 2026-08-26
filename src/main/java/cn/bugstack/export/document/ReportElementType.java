@@ -20,6 +20,9 @@ public enum ReportElementType {
     /** 可编辑 Visio 或其 PNG 预览图。 */
     DIAGRAM,
 
+    /** Word 原生可编辑图表。 */
+    CHART,
+
     /** 项目符号或编号列表项。 */
     LIST_ITEM,
 

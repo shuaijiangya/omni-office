@@ -4,6 +4,7 @@ import cn.bugstack.protocol.document.DocumentSpec;
 import cn.bugstack.protocol.document.SectionSpec;
 import cn.bugstack.protocol.document.block.AbstractListBlockSpec;
 import cn.bugstack.protocol.document.block.BlockSpec;
+import cn.bugstack.protocol.document.block.ChartBlockSpec;
 import cn.bugstack.protocol.document.block.DiagramBlockSpec;
 import cn.bugstack.protocol.document.block.ImageBlockSpec;
 import cn.bugstack.protocol.document.block.ParagraphBlockSpec;
@@ -76,6 +77,19 @@ public final class DocumentCostEstimator {
                 if (table.getRows() != null) table.getRows().forEach(row -> {
                     if (row != null) row.forEach(item -> counter.text += length(item));
                 });
+            } else if (block instanceof ChartBlockSpec) {
+                ChartBlockSpec chart = (ChartBlockSpec) block;
+                counter.media++;
+                counter.text += length(chart.getTitle()) + length(chart.getCaption())
+                        + length(chart.getCategoryAxisTitle()) + length(chart.getValueAxisTitle());
+                if (chart.getCategories() != null) {
+                    chart.getCategories().forEach(item -> counter.text += length(item));
+                }
+                if (chart.getSeries() != null) {
+                    chart.getSeries().forEach(item -> {
+                        if (item != null) counter.text += length(item.getName());
+                    });
+                }
             } else if (block instanceof ImageBlockSpec || block instanceof DiagramBlockSpec) {
                 counter.media++;
             } else if (block instanceof SubsectionBlockSpec) {

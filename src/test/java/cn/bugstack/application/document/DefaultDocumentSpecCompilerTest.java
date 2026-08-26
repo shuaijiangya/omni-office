@@ -1,6 +1,7 @@
 package cn.bugstack.application.document;
 
 import cn.bugstack.export.document.ReportImage;
+import cn.bugstack.export.document.ReportChart;
 import cn.bugstack.export.document.CaptionPosition;
 import cn.bugstack.export.document.ReportListItem;
 import cn.bugstack.export.document.ReportPageBreak;
@@ -11,6 +12,8 @@ import cn.bugstack.protocol.document.DocumentMetadataSpec;
 import cn.bugstack.protocol.document.DocumentSpec;
 import cn.bugstack.protocol.document.SectionSpec;
 import cn.bugstack.protocol.document.block.BulletListBlockSpec;
+import cn.bugstack.protocol.document.block.ChartBlockSpec;
+import cn.bugstack.protocol.document.block.ChartSeriesSpec;
 import cn.bugstack.protocol.document.block.ImageBlockSpec;
 import cn.bugstack.protocol.document.block.PageBreakBlockSpec;
 import cn.bugstack.protocol.document.block.ParagraphBlockSpec;
@@ -74,6 +77,16 @@ class DefaultDocumentSpecCompilerTest {
         image.setCaption("Image caption");
         section.addBlock(image);
 
+        ChartBlockSpec chart = new ChartBlockSpec();
+        chart.setChartType("LINE");
+        chart.setCategories(Arrays.asList("一月", "二月"));
+        ChartSeriesSpec chartSeries = new ChartSeriesSpec();
+        chartSeries.setName("活跃用户");
+        chartSeries.setValues(Arrays.asList(10D, 12D));
+        chart.setSeries(Collections.singletonList(chartSeries));
+        chart.setCaption("趋势图");
+        section.addBlock(chart);
+
         SubsectionBlockSpec subsection = new SubsectionBlockSpec("Child");
         subsection.addBlock(new ParagraphBlockSpec("Child body"));
         section.addBlock(subsection);
@@ -89,8 +102,9 @@ class DefaultDocumentSpecCompilerTest {
         assertInstanceOf(ReportListItem.class, compiled.getElements().get(2));
         assertInstanceOf(ReportTable.class, compiled.getElements().get(3));
         assertInstanceOf(ReportImage.class, compiled.getElements().get(4));
-        assertInstanceOf(ReportSection.class, compiled.getElements().get(5));
-        assertInstanceOf(ReportPageBreak.class, compiled.getElements().get(6));
+        assertInstanceOf(ReportChart.class, compiled.getElements().get(5));
+        assertInstanceOf(ReportSection.class, compiled.getElements().get(6));
+        assertInstanceOf(ReportPageBreak.class, compiled.getElements().get(7));
         assertEquals("Table caption", ((ReportTable) compiled.getElements().get(3)).getCaption().getText());
         assertEquals("#112233", ((ReportParagraph) compiled.getElements().get(0)).getFontColor());
         assertEquals(2, ((ReportParagraph) compiled.getElements().get(0)).getTextRanges().size());
@@ -109,5 +123,7 @@ class DefaultDocumentSpecCompilerTest {
         assertEquals(CaptionPosition.ABOVE,
                 ((ReportTable) compiled.getElements().get(3)).getCaption().getPosition());
         assertEquals("Alternative", ((ReportImage) compiled.getElements().get(4)).getAlternativeText());
+        assertEquals("LINE", ((ReportChart) compiled.getElements().get(5)).getChartType().name());
+        assertEquals(2, ((ReportChart) compiled.getElements().get(5)).getSeries().get(0).getValues().size());
     }
 }

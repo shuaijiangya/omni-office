@@ -7,6 +7,7 @@
   "textFormatting": ["fontColor", "textRanges", "fontFamily", "asciiFontFamily", "farEastFontFamily", "fontSize", "bold", "italic", "underline"],
   "tableFormatting": ["responsivePageWidth", "columnWidthWeights", "centeredCellTextByDefault", "headerTextStyle", "bodyTextStyle", "alignment", "merges"],
   "captionPositions": ["ABOVE", "BELOW"],
+  "chartTypes": ["COLUMN", "BAR", "PIE", "LINE", "RADAR"],
   "blocks": [
     { "type": "paragraph", "renderable": true },
     { "type": "bulletList", "renderable": true },
@@ -15,6 +16,12 @@
     { "type": "image", "renderable": true, "externalInput": "managed assetId" },
     { "type": "subsection", "renderable": true },
     { "type": "pageBreak", "renderable": true },
+    {
+      "type": "chart",
+      "renderable": true,
+      "editableInWord": true,
+      "comparisonMode": "two or more series in COLUMN or BAR"
+    },
     {
       "type": "diagram",
       "renderable": true,

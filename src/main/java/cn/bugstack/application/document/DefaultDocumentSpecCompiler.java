@@ -3,6 +3,10 @@ package cn.bugstack.application.document;
 import cn.bugstack.export.document.CaptionTargetType;
 import cn.bugstack.export.document.CaptionPosition;
 import cn.bugstack.export.document.ReportCaption;
+import cn.bugstack.export.document.ReportChart;
+import cn.bugstack.export.document.ReportChartLegendPosition;
+import cn.bugstack.export.document.ReportChartSeries;
+import cn.bugstack.export.document.ReportChartType;
 import cn.bugstack.export.document.ReportDocument;
 import cn.bugstack.export.document.ReportElement;
 import cn.bugstack.export.document.ReportImage;
@@ -21,6 +25,8 @@ import cn.bugstack.protocol.document.SectionSpec;
 import cn.bugstack.protocol.document.block.AbstractListBlockSpec;
 import cn.bugstack.protocol.document.block.BlockSpec;
 import cn.bugstack.protocol.document.block.BulletListBlockSpec;
+import cn.bugstack.protocol.document.block.ChartBlockSpec;
+import cn.bugstack.protocol.document.block.ChartSeriesSpec;
 import cn.bugstack.protocol.document.block.DiagramBlockSpec;
 import cn.bugstack.protocol.document.block.ImageBlockSpec;
 import cn.bugstack.protocol.document.block.PageBreakBlockSpec;
@@ -93,6 +99,9 @@ public final class DefaultDocumentSpecCompiler implements DocumentSpecCompiler {
         if (block instanceof TableBlockSpec) {
             return compileTable((TableBlockSpec) block);
         }
+        if (block instanceof ChartBlockSpec) {
+            return compileChart((ChartBlockSpec) block);
+        }
         if (block instanceof ImageBlockSpec) {
             return compileImage((ImageBlockSpec) block);
         }
@@ -112,6 +121,34 @@ public final class DefaultDocumentSpecCompiler implements DocumentSpecCompiler {
             return diagramBlockResolver.resolve((DiagramBlockSpec) block);
         }
         throw new IllegalArgumentException("unsupported document block: " + block.getClass().getName());
+    }
+
+    /** 将外部图表协议转换为报告语义图表。 */
+    private ReportChart compileChart(ChartBlockSpec source) {
+        ReportChart target = new ReportChart();
+        target.setChartType(ReportChartType.valueOf(source.getChartType()));
+        target.setTitle(source.getTitle());
+        target.setCategories(source.getCategories());
+        List<ReportChartSeries> series = new ArrayList<>();
+        for (ChartSeriesSpec item : source.getSeries()) {
+            series.add(new ReportChartSeries(item.getName(), item.getValues()));
+        }
+        target.setSeries(series);
+        target.setWidthPoints(source.getWidthPoints());
+        target.setHeightPoints(source.getHeightPoints());
+        target.setLegendVisible(source.isLegendVisible());
+        target.setLegendPosition(ReportChartLegendPosition.valueOf(source.getLegendPosition()));
+        target.setShowValues(source.isShowValues());
+        target.setShowPercentages(source.isShowPercentages());
+        target.setCategoryAxisTitle(source.getCategoryAxisTitle());
+        target.setValueAxisTitle(source.getValueAxisTitle());
+        if (hasText(source.getCaption())) {
+            ReportCaption caption = new ReportCaption(CaptionTargetType.IMAGE, source.getCaption());
+            caption.setAutoNumbered(source.isCaptionAutoNumbered());
+            caption.setPosition(CaptionPosition.valueOf(source.getCaptionPosition()));
+            target.setCaption(caption);
+        }
+        return target;
     }
 
     private void compileList(AbstractListBlockSpec source, ReportSection target, ReportListType listType) {

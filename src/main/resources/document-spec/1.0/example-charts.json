@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1.0",
+  "metadata": {
+    "title": "DocumentSpec 图表示例",
+    "author": "omni-office"
+  },
+  "layout": {
+    "styleProfile": "BUSINESS_BRIEF",
+    "headingNumberingEnabled": true,
+    "paperSize": "A4",
+    "orientation": "PORTRAIT"
+  },
+  "sections": [
+    {
+      "title": "经营分析",
+      "blocks": [
+        {
+          "type": "chart",
+          "chartType": "COLUMN",
+          "title": "年度收入对比",
+          "categories": ["第一季度", "第二季度", "第三季度", "第四季度"],
+          "series": [
+            {"name": "2025 年", "values": [120, 138, 151, 169]},
+            {"name": "2026 年", "values": [142, 163, 188, 216]}
+          ],
+          "legendVisible": true,
+          "legendPosition": "BOTTOM",
+          "showValues": true,
+          "categoryAxisTitle": "季度",
+          "valueAxisTitle": "万元",
+          "caption": "年度收入对比图",
+          "captionPosition": "BELOW"
+        },
+        {
+          "type": "chart",
+          "chartType": "BAR",
+          "title": "单项指标评估",
+          "categories": ["任务完成率（%）"],
+          "series": [
+            {"name": "", "values": [92]}
+          ],
+          "legendVisible": false,
+          "showValues": true,
+          "caption": "横向单指标单样本对比图",
+          "captionPosition": "BELOW"
+        }
+      ]
+    }
+  ]
+}

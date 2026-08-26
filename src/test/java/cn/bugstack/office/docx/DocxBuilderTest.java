@@ -4,6 +4,8 @@ import cn.bugstack.office.docx.api.DocxDocument;
 import cn.bugstack.office.docx.model.CaptionNode;
 import cn.bugstack.office.docx.model.CaptionType;
 import cn.bugstack.office.docx.model.CaptionRefInline;
+import cn.bugstack.office.docx.model.ChartInline;
+import cn.bugstack.office.docx.model.ChartType;
 import cn.bugstack.office.docx.model.CoverPageNode;
 import cn.bugstack.office.docx.model.DocumentNode;
 import cn.bugstack.office.docx.model.ImageInline;
@@ -218,6 +220,29 @@ class DocxBuilderTest {
         assertEquals(120.0, table.getColumnWidths()[0]);
         assertEquals(240.0, table.getColumnWidths()[1]);
         assertEquals(2, firstCell.getColumnSpan());
+    }
+
+    @Test
+    void buildsNativeChartAsParagraphInline() {
+        DocxDocument document = DocxDocument.create()
+                .section()
+                .paragraph()
+                .chart(ChartType.COLUMN)
+                .title("年度对比")
+                .categories("一季度", "二季度")
+                .series("2025", 10D, 12D)
+                .series("2026", 14D, 18D)
+                .end()
+                .end()
+                .end();
+
+        ParagraphNode paragraph = (ParagraphNode) document.getNode().getSections().get(0).getBlocks().get(0);
+        ChartInline inline = (ChartInline) paragraph.getInlines().get(0);
+
+        assertEquals(1, paragraph.getInlines().size());
+        assertInstanceOf(ChartInline.class, inline);
+        assertEquals(ChartType.COLUMN, inline.getChart().getChartType());
+        assertEquals(2, inline.getChart().getSeries().size());
     }
 
     @Test

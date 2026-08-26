@@ -234,7 +234,7 @@ byte[] content = exporter.exportToBytes(input);
 
 ### 使用 DocumentSpec 动态生成文档
 
-不需要预定义业务章节时，可以使用 `DocumentSpec` 描述章节、段落、列表、表格、图片、
+不需要预定义业务章节时，可以使用 `DocumentSpec` 描述章节、段落、列表、表格、图片、原生图表、
 子章节和分页符，再通过动态导出器复用现有语义校验及 DOCX/PDF/HTML 渲染链路：
 
 ```java
@@ -256,6 +256,7 @@ src/main/resources/document-spec/1.0/schema.json
 src/main/resources/document-spec/1.0/capabilities.json
 src/main/resources/document-spec/1.0/example-simple.json
 src/main/resources/document-spec/1.0/example-complete.json
+src/main/resources/document-spec/1.0/example-charts.json
 ```
 
 `DocumentSpecJsonCodec` 使用严格 JSON 反序列化，未知字段会被拒绝；
@@ -326,6 +327,60 @@ Times New Roman（新罗马）。`TableStyle` 分别提供 `headerTextStyle` 与
 
 未配置的属性继承 `StyleProfile` 中的 `TableStyle`；单表配置只覆盖非空属性，因此可以只替换中文字体或只替换
 英文数字字体。`fontFamily` 是兼容性的统一字体入口，`asciiFontFamily` 和 `farEastFontFamily` 的优先级更高。
+
+### Word 原生图表
+
+`chart` block 和业务侧 `ReportChartBuilder` 支持 `COLUMN`（柱状图）、`BAR`（条形图）、`PIE`（饼图）、
+`LINE`（折线图）和 `RADAR`（雷达图）。对比图无需额外类型：多对象对比可为 `COLUMN` 或
+`BAR` 配置两个及以上数据系列；横向单指标单样本模式使用 `BAR` 的一个分类和一个系列。
+图表以 Word 原生对象写入，DOCX 中可继续编辑；PDF/HTML 输出使用同一图表的静态呈现。
+
+```java
+section.chart(ReportChartType.COLUMN)
+        .title("年度收入对比")
+        .categories("第一季度", "第二季度", "第三季度", "第四季度")
+        .series("2025 年", 120D, 138D, 151D, 169D)
+        .series("2026 年", 142D, 163D, 188D, 216D)
+        .axisTitles("季度", "万元")
+        .legend(true, ReportChartLegendPosition.BOTTOM)
+        .showValues(true)
+        .caption("年度收入对比图", CaptionPosition.BELOW)
+        .end();
+```
+
+横向单指标单样本对比图：
+
+```java
+section.chart(ReportChartType.BAR)
+        .title("单项指标评估")
+        .categories("任务完成率（%）")
+        .series("", 92D)
+        .legend(false, ReportChartLegendPosition.BOTTOM)
+        .showValues(true)
+        .caption("横向单指标单样本对比图", CaptionPosition.BELOW)
+        .end();
+```
+
+DocumentSpec 中使用同名 `chart` 数据结构，因此内部 AI、`omni_document_export` Function Calling 与 MCP
+无需新增专用图表工具。校验器会检查分类与系列长度一致、数值有限、饼图仅一个系列且总值为正、雷达图至少三个分类，
+并限制分类数、系列数和图表尺寸。完整 JSON 见 `example-charts.json`。
+
+直接使用 word-core 时，图表也可以作为 Paragraph 的 inline child 构建，不要求先创建图表子章节：
+
+```java
+section.paragraph()
+        .chart(ChartType.COLUMN)
+        .title("年度收入对比")
+        .categories("第一季度", "第二季度")
+        .series("2025 年", 120D, 138D)
+        .series("2026 年", 142D, 163D)
+        .legend(true, ChartLegendPosition.BOTTOM)
+        .showValues(true)
+        .end() // 返回 ParagraphBuilder
+        .end(); // 返回 SectionBuilder
+```
+
+`section.chart(...)` 独立块入口继续保留；业务 Export 的图表编译也统一使用 paragraph 行内图表路径。
 
 M2 提供 `DiagramSpec 1.0`、受控图工件存储和 Word 图形嵌入。`diagram` block 可以直接
 携带 `definition`，也可以通过 `diagramArtifactId` 复用提前生成的 VSDX/PNG 工件：
@@ -1060,6 +1115,12 @@ java -cp "target/classes:lib/*" \
   cn.bugstack.export.example.FormattingCapabilitiesReportExportExample
 
 java -cp "target/classes:lib/*" \
+  cn.bugstack.export.example.ChartCapabilitiesReportExportExample
+
+java -cp "target/classes:lib/*" \
+  cn.bugstack.office.docx.example.ParagraphChartCapabilitiesExample
+
+java -cp "target/classes:lib/*" \
   cn.bugstack.office.docx.example.DocxWrapperExample
 
 java -cp "target/classes:lib/*" \
@@ -1075,6 +1136,8 @@ Windows 请把 classpath 中的 `:` 替换为 `;`。
 | `ComposableTextReportExportExample` | 任意组合评估模块的 DOCX 报告 |
 | `AssessmentReportExportExample` | 使用通用定义、模块计划和语义文档生成评估报告 |
 | `FormattingCapabilitiesReportExportExample` | 同段多文本样式、页面自适应表格、默认居中、合并与题注位置 |
+| `ChartCapabilitiesReportExportExample` | 柱状图、饼图、多系列及横向单指标单样本对比图、折线图和雷达图 |
+| `ParagraphChartCapabilitiesExample` | 使用 `section.paragraph().chart(...)` 构建五种原生图表 |
 | `DocxWrapperExample` | 封面、修订记录、审批页、目录、列表、图片、题注、表格和类设计表格 |
 | `EditableVisioWordExample` | Word 中的 Visio 预览和可编辑 Visio 文件 |
 | `MultiLevelHeadingExample` | Word 原生一至九级标题编号 |

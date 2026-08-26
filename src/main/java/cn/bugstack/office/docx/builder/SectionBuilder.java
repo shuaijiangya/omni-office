@@ -8,6 +8,8 @@ import cn.bugstack.office.docx.design.parser.ClassMetadataParser;
 import cn.bugstack.office.docx.design.parser.SourceClassMetadataParser;
 import cn.bugstack.office.docx.model.CaptionNode;
 import cn.bugstack.office.docx.model.CaptionType;
+import cn.bugstack.office.docx.model.ChartNode;
+import cn.bugstack.office.docx.model.ChartType;
 import cn.bugstack.office.docx.model.ParagraphNode;
 import cn.bugstack.office.docx.model.PageBreakNode;
 import cn.bugstack.office.docx.model.SectionNode;
@@ -207,6 +209,20 @@ public class SectionBuilder {
         TableNode table = new TableNode();
         section.addBlock(table);
         return new TableBuilder<>(this, table);
+    }
+
+    /**
+     * 在当前章节中追加 Word 原生可编辑图表。
+     *
+     * @param type 图表类型
+     * @return 图表 Builder
+     */
+    public ChartBuilder<SectionBuilder> chart(ChartType type) {
+        if (type == null) throw new IllegalArgumentException("chart type must not be null");
+        ChartNode chart = new ChartNode();
+        chart.setChartType(type);
+        section.addBlock(chart);
+        return new ChartBuilder<>(this, chart);
     }
 
     /**

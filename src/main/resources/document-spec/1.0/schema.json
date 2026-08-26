@@ -126,6 +126,7 @@
         { "$ref": "#/$defs/tableBlock" },
         { "$ref": "#/$defs/imageBlock" },
         { "$ref": "#/$defs/diagramBlock" },
+        { "$ref": "#/$defs/chartBlock" },
         { "$ref": "#/$defs/subsectionBlock" },
         { "$ref": "#/$defs/pageBreakBlock" }
       ]
@@ -316,6 +317,53 @@
         { "required": ["diagramArtifactId"], "not": { "required": ["definition"] } },
         { "required": ["definition"], "not": { "required": ["diagramArtifactId"] } }
       ]
+    },
+    "chartSeries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["values"],
+      "properties": {
+        "name": { "type": ["string", "null"], "maxLength": 20000 },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "type": "number" }
+        }
+      }
+    },
+    "chartBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "chartType", "categories", "series"],
+      "properties": {
+        "type": { "const": "chart" },
+        "chartType": { "enum": ["COLUMN", "BAR", "PIE", "LINE", "RADAR"] },
+        "title": { "type": "string", "maxLength": 20000 },
+        "categories": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/nonBlankText" }
+        },
+        "series": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/chartSeries" }
+        },
+        "widthPoints": { "type": "number", "minimum": 100, "maximum": 1000 },
+        "heightPoints": { "type": "number", "minimum": 100, "maximum": 1000 },
+        "legendVisible": { "type": "boolean" },
+        "legendPosition": { "enum": ["BOTTOM", "TOP", "LEFT", "RIGHT"] },
+        "showValues": { "type": "boolean" },
+        "showPercentages": { "type": "boolean" },
+        "categoryAxisTitle": { "type": ["string", "null"], "maxLength": 20000 },
+        "valueAxisTitle": { "type": ["string", "null"], "maxLength": 20000 },
+        "caption": { "type": "string", "maxLength": 20000 },
+        "captionAutoNumbered": { "type": "boolean" },
+        "captionPosition": { "$ref": "#/$defs/captionPosition" }
+      }
     },
     "subsectionBlock": {
       "type": "object",

@@ -4,6 +4,8 @@ import cn.bugstack.protocol.document.DocumentMetadataSpec;
 import cn.bugstack.protocol.document.DocumentSpec;
 import cn.bugstack.protocol.document.SectionSpec;
 import cn.bugstack.protocol.document.block.DiagramBlockSpec;
+import cn.bugstack.protocol.document.block.ChartBlockSpec;
+import cn.bugstack.protocol.document.block.ChartSeriesSpec;
 import cn.bugstack.protocol.document.block.ParagraphBlockSpec;
 import cn.bugstack.protocol.document.block.SubsectionBlockSpec;
 import cn.bugstack.protocol.document.block.TableBlockSpec;
@@ -158,6 +160,69 @@ class DocumentSpecValidatorTest {
         assertTrue(result.getViolations().stream()
                 .anyMatch(v -> "ONE_OF_REQUIRED".equals(v.getCode())
                         && v.getPath().endsWith("/blocks/1")));
+    }
+
+    @Test
+    void acceptsMultiSeriesComparisonChart() {
+        DocumentSpec spec = validSpec();
+        ChartBlockSpec chart = new ChartBlockSpec();
+        chart.setChartType("COLUMN");
+        chart.setCategories(Arrays.asList("第一季度", "第二季度"));
+        ChartSeriesSpec previous = new ChartSeriesSpec();
+        previous.setName(null);
+        previous.setValues(Arrays.asList(10D, 12D));
+        ChartSeriesSpec current = new ChartSeriesSpec();
+        current.setName("");
+        current.setValues(Arrays.asList(14D, 18D));
+        chart.setSeries(Arrays.asList(previous, current));
+        chart.setCategoryAxisTitle(null);
+        chart.setValueAxisTitle("");
+        spec.getSections().get(0).addBlock(chart);
+
+        DocumentSpecValidationResult result = new DocumentSpecValidator().validate(spec);
+
+        assertTrue(result.isValid(), () -> result.getViolations().toString());
+    }
+
+    @Test
+    void acceptsHorizontalSingleMetricSingleSampleComparisonChart() {
+        DocumentSpec spec = validSpec();
+        ChartBlockSpec chart = new ChartBlockSpec();
+        chart.setChartType("BAR");
+        chart.setCategories(Collections.singletonList("任务完成率（%）"));
+        ChartSeriesSpec sample = new ChartSeriesSpec();
+        sample.setName("");
+        sample.setValues(Collections.singletonList(92D));
+        chart.setSeries(Collections.singletonList(sample));
+        chart.setLegendVisible(false);
+        chart.setShowValues(true);
+        spec.getSections().get(0).addBlock(chart);
+
+        DocumentSpecValidationResult result = new DocumentSpecValidator().validate(spec);
+
+        assertTrue(result.isValid(), () -> result.getViolations().toString());
+    }
+
+    @Test
+    void rejectsInvalidPieAndMismatchedChartSeries() {
+        DocumentSpec spec = validSpec();
+        ChartBlockSpec chart = new ChartBlockSpec();
+        chart.setChartType("PIE");
+        chart.setCategories(Arrays.asList("A", "B"));
+        ChartSeriesSpec first = new ChartSeriesSpec();
+        first.setName("占比");
+        first.setValues(Collections.singletonList(-1D));
+        ChartSeriesSpec second = new ChartSeriesSpec();
+        second.setName("不允许的第二系列");
+        second.setValues(Arrays.asList(1D, 2D));
+        chart.setSeries(Arrays.asList(first, second));
+        spec.getSections().get(0).addBlock(chart);
+
+        DocumentSpecValidationResult result = new DocumentSpecValidator().validate(spec);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getViolations().stream().anyMatch(v -> "COLUMN_MISMATCH".equals(v.getCode())));
+        assertTrue(result.getViolations().stream().anyMatch(v -> "INVALID_CHART_DATA".equals(v.getCode())));
     }
 
     private DocumentSpec validSpec() {

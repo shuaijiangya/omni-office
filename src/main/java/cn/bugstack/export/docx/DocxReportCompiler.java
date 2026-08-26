@@ -7,6 +7,8 @@ import cn.bugstack.export.definition.ReportLayout;
 import cn.bugstack.export.document.CaptionTargetType;
 import cn.bugstack.export.document.CaptionPosition;
 import cn.bugstack.export.document.ReportCaption;
+import cn.bugstack.export.document.ReportChart;
+import cn.bugstack.export.document.ReportChartSeries;
 import cn.bugstack.export.document.ReportClassDesignTable;
 import cn.bugstack.export.document.ReportDocument;
 import cn.bugstack.export.document.ReportDiagram;
@@ -24,6 +26,8 @@ import cn.bugstack.export.document.ReportTextRange;
 import cn.bugstack.export.document.ReportTextRangeStyle;
 import cn.bugstack.office.docx.api.DocxDocument;
 import cn.bugstack.office.docx.builder.SectionBuilder;
+import cn.bugstack.office.docx.model.ChartLegendPosition;
+import cn.bugstack.office.docx.model.ChartType;
 import cn.bugstack.office.docx.model.TableHorizontalAlignment;
 import cn.bugstack.office.docx.model.TableVerticalMerge;
 import cn.bugstack.office.docx.style.RunStyle;
@@ -383,6 +387,8 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
             writeImage(target, (ReportImage) element);
         } else if (element instanceof ReportDiagram) {
             writeDiagram(target, (ReportDiagram) element);
+        } else if (element instanceof ReportChart) {
+            writeChart(target, (ReportChart) element);
         } else if (element instanceof ReportPageBreak) {
             target.pageBreak();
         } else if (element instanceof ReportClassDesignTable) {
@@ -549,6 +555,27 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
                     diagram.getMaxWidthPoints(), diagram.getMaxHeightPoints()).end();
         }
         writeCaption(target, diagram.getCaption(), CaptionPosition.BELOW);
+    }
+
+    /** 将报告图表编译为 DOCX 原生可编辑图表。 */
+    private void writeChart(SectionBuilder target, ReportChart chart) {
+        writeCaption(target, chart.getCaption(), CaptionPosition.ABOVE);
+        cn.bugstack.office.docx.builder.ParagraphBuilder<SectionBuilder> paragraph = target.paragraph();
+        cn.bugstack.office.docx.builder.ChartBuilder<
+                cn.bugstack.office.docx.builder.ParagraphBuilder<SectionBuilder>> builder = paragraph
+                .chart(ChartType.valueOf(chart.getChartType().name()))
+                .title(chart.getTitle())
+                .categories(chart.getCategories().toArray(new String[0]))
+                .size(chart.getWidthPoints(), chart.getHeightPoints())
+                .legend(chart.isLegendVisible(), ChartLegendPosition.valueOf(chart.getLegendPosition().name()))
+                .showValues(chart.isShowValues())
+                .showPercentages(chart.isShowPercentages())
+                .axisTitles(chart.getCategoryAxisTitle(), chart.getValueAxisTitle());
+        for (ReportChartSeries series : chart.getSeries()) {
+            builder.series(series.getName(), series.getValues().toArray(new Double[0]));
+        }
+        builder.end().end();
+        writeCaption(target, chart.getCaption(), CaptionPosition.BELOW);
     }
 
     /**

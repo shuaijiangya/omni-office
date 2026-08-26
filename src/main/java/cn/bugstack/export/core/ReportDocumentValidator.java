@@ -1,6 +1,9 @@
 package cn.bugstack.export.core;
 
 import cn.bugstack.export.document.ReportClassDesignTable;
+import cn.bugstack.export.document.ReportChart;
+import cn.bugstack.export.document.ReportChartSeries;
+import cn.bugstack.export.document.ReportChartType;
 import cn.bugstack.export.document.ReportDocument;
 import cn.bugstack.export.document.ReportDiagram;
 import cn.bugstack.export.document.ReportDiagramEmbedMode;
@@ -102,6 +105,8 @@ public final class ReportDocumentValidator {
                 }
             } else if (element instanceof ReportDiagram) {
                 validateDiagram((ReportDiagram) element, elementPath, errors);
+            } else if (element instanceof ReportChart) {
+                validateChart((ReportChart) element, elementPath, errors);
             } else if (element instanceof ReportClassDesignTable) {
                 ReportClassDesignTable table = (ReportClassDesignTable) element;
                 if (table.getSourceRoot() == null || !hasText(table.getClassName())) {
@@ -167,6 +172,60 @@ public final class ReportDocumentValidator {
         if (!Double.isFinite(diagram.getMaxWidthPoints()) || !Double.isFinite(diagram.getMaxHeightPoints())
                 || diagram.getMaxWidthPoints() <= 0 || diagram.getMaxHeightPoints() <= 0) {
             errors.add("report diagram dimensions must be finite positive numbers at " + path);
+        }
+    }
+
+    /** 校验图表类型、数据矩阵和尺寸。 */
+    private void validateChart(ReportChart chart, String path, List<String> errors) {
+        if (chart.getChartType() == null) errors.add("report chart type must not be null at " + path);
+        if (chart.getCategories().isEmpty()) errors.add("report chart categories must not be empty at " + path);
+        if (chart.getSeries().isEmpty()) errors.add("report chart series must not be empty at " + path);
+        for (int index = 0; index < chart.getCategories().size(); index++) {
+            if (!hasText(chart.getCategories().get(index))) {
+                errors.add("report chart category must not be blank at " + path + "/categories[" + index + "]");
+            }
+        }
+        if (!Double.isFinite(chart.getWidthPoints()) || !Double.isFinite(chart.getHeightPoints())
+                || chart.getWidthPoints() <= 0 || chart.getHeightPoints() <= 0) {
+            errors.add("report chart dimensions must be finite positive numbers at " + path);
+        }
+        for (int index = 0; index < chart.getSeries().size(); index++) {
+            ReportChartSeries series = chart.getSeries().get(index);
+            if (series == null) {
+                errors.add("report chart series must not be null at " + path + "/series[" + index + "]");
+                continue;
+            }
+            if (series.getValues().size() != chart.getCategories().size()) {
+                errors.add("report chart series values must match category count at " + path + "/series[" + index + "]");
+            }
+            for (Double value : series.getValues()) {
+                if (value == null || !Double.isFinite(value)) {
+                    errors.add("report chart values must be finite numbers at " + path + "/series[" + index + "]");
+                    break;
+                }
+            }
+        }
+        if (chart.getChartType() == ReportChartType.PIE && chart.getSeries().size() != 1) {
+            errors.add("report pie chart must contain exactly one series at " + path);
+        }
+        if (chart.getChartType() == ReportChartType.PIE && chart.getSeries().size() == 1) {
+            double total = 0D;
+            boolean nonNegative = true;
+            for (Double value : chart.getSeries().get(0).getValues()) {
+                if (value != null && Double.isFinite(value)) {
+                    total += value;
+                    nonNegative &= value >= 0D;
+                }
+            }
+            if (!nonNegative || total <= 0D) {
+                errors.add("report pie chart values must be non-negative with a positive total at " + path);
+            }
+        }
+        if (chart.getChartType() == ReportChartType.RADAR && chart.getCategories().size() < 3) {
+            errors.add("report radar chart must contain at least three categories at " + path);
+        }
+        if (chart.isShowPercentages() && chart.getChartType() != ReportChartType.PIE) {
+            errors.add("report chart percentages are supported only for PIE at " + path);
         }
     }
 

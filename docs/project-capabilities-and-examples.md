@@ -148,11 +148,21 @@ DocumentSpec 当前支持：
 - 段落、多个 TextRange，以及每个范围的独立样式。
 - 字体、字号、颜色、粗体、斜体和下划线。
 - 列表、子章节和分页符。
-- 图片、DiagramSpec、Visio 和题注。
+- 图片、DiagramSpec、Visio、Word 原生图表和题注。
 - 页面宽度自适应表格、比例列宽、对齐和合并。
 - DOCX、PDF 和单文件 HTML 输出。
 
 完整示例：[`example-complete.json`](../src/main/resources/document-spec/1.0/example-complete.json)
+
+图表示例：[`example-charts.json`](../src/main/resources/document-spec/1.0/example-charts.json)
+
+业务 Export 可以直接使用 `ReportChartBuilder` 生成柱状图、条形图、饼图、折线图和雷达图；对比图可使用
+两个或更多数据系列，也可使用单分类、单系列 `BAR` 表达横向单指标单样本结果。完整可运行代码：
+[`ChartCapabilitiesReportExportExample`](../src/main/java/cn/bugstack/export/example/ChartCapabilitiesReportExportExample.java)
+
+word-core 调用方还可以使用 `section.paragraph().chart(...).end().end()` 将原生图表作为 paragraph inline
+构建，无需增加图表子章节。完整示例：
+[`ParagraphChartCapabilitiesExample`](../src/main/java/cn/bugstack/office/docx/example/ParagraphChartCapabilitiesExample.java)
 
 ## 5. 字体、富文本和表格
 

@@ -5,6 +5,10 @@ import cn.bugstack.office.docx.model.ApprovalPageNode;
 import cn.bugstack.office.docx.model.CaptionNode;
 import cn.bugstack.office.docx.model.CaptionRefInline;
 import cn.bugstack.office.docx.model.CaptionType;
+import cn.bugstack.office.docx.model.ChartLegendPosition;
+import cn.bugstack.office.docx.model.ChartInline;
+import cn.bugstack.office.docx.model.ChartNode;
+import cn.bugstack.office.docx.model.ChartSeriesNode;
 import cn.bugstack.office.docx.model.CoverPageNode;
 import cn.bugstack.office.docx.model.DocxBlock;
 import cn.bugstack.office.docx.model.DocxInline;
@@ -64,6 +68,9 @@ import com.aspose.words.Table;
 import com.aspose.words.TableAlignment;
 import com.aspose.words.Underline;
 import com.aspose.words.CellVerticalAlignment;
+import com.aspose.words.Chart;
+import com.aspose.words.ChartSeries;
+import com.aspose.words.LegendPosition;
 
 import javax.imageio.ImageIO;
 import java.awt.Color;
@@ -537,12 +544,114 @@ public class AsposeDocxRenderer implements DocxRenderer {
             } else if (block instanceof TableNode) {
                 endActiveList(context);
                 renderTable((TableNode) block, context);
+            } else if (block instanceof ChartNode) {
+                endActiveList(context);
+                renderChart((ChartNode) block, context);
             } else if (block instanceof PageBreakNode) {
                 endActiveList(context);
                 context.getBuilder().insertBreak(BreakType.PAGE_BREAK);
             }
         }
         endActiveList(context);
+    }
+
+    /** 将图表节点渲染为 Word 内可继续编辑的原生图表对象。 */
+    private void renderChart(ChartNode source, RenderContext context) throws Exception {
+        DocumentBuilder builder = context.getBuilder();
+        insertChart(source, context);
+        builder.writeln();
+        builder.getParagraphFormat().clearFormatting();
+        builder.getFont().clearFormatting();
+    }
+
+    /** 在当前 Aspose 段落位置插入 Word 原生图表，不负责结束段落。 */
+    private void insertChart(ChartNode source, RenderContext context) throws Exception {
+        DocumentBuilder builder = context.getBuilder();
+        builder.getParagraphFormat().setAlignment(ParagraphAlignment.CENTER);
+        com.aspose.words.PageSetup page = builder.getCurrentSection().getPageSetup();
+        double availableWidth = page.getPageWidth() - page.getLeftMargin() - page.getRightMargin();
+        double renderedWidth = Math.min(source.getWidthPoints(), availableWidth);
+        double renderedHeight = source.getHeightPoints() * renderedWidth / source.getWidthPoints();
+        Shape shape = builder.insertChart(toAsposeChartType(source),
+                renderedWidth, renderedHeight);
+        Chart chart = shape.getChart();
+        chart.getSeries().clear();
+        String[] categories = source.getCategories().toArray(new String[0]);
+        for (ChartSeriesNode sourceSeries : source.getSeries()) {
+            double[] values = new double[sourceSeries.getValues().size()];
+            for (int index = 0; index < values.length; index++) {
+                values[index] = sourceSeries.getValues().get(index);
+            }
+            String seriesName = sourceSeries.getName() == null ? "" : sourceSeries.getName();
+            ChartSeries series = chart.getSeries().add(seriesName, categories, values);
+            if (source.isShowValues() || source.isShowPercentages()) {
+                series.hasDataLabels(true);
+                series.getDataLabels().setShowValue(source.isShowValues());
+                series.getDataLabels().setShowPercentage(source.isShowPercentages());
+                applyChartFont(series.getDataLabels().getFont());
+            }
+        }
+        boolean hasTitle = source.getTitle() != null && !source.getTitle().trim().isEmpty();
+        chart.getTitle().setShow(hasTitle);
+        if (hasTitle) {
+            chart.getTitle().setText(source.getTitle().trim());
+            chart.getTitle().setOverlay(false);
+            applyChartFont(chart.getTitle().getFont());
+        }
+        chart.getLegend().setPosition(source.isLegendVisible()
+                ? toAsposeLegendPosition(source.getLegendPosition()) : LegendPosition.NONE);
+        chart.getLegend().setOverlay(false);
+        applyChartFont(chart.getLegend().getFont());
+        if (source.getChartType() != cn.bugstack.office.docx.model.ChartType.PIE) {
+            applyAxisTitle(chart.getAxisX(), source.getCategoryAxisTitle());
+            applyAxisTitle(chart.getAxisY(), source.getValueAxisTitle());
+            applyChartFont(chart.getAxisX().getTickLabels().getFont());
+            applyChartFont(chart.getAxisY().getTickLabels().getFont());
+        }
+    }
+
+    /** 应用可选坐标轴标题。 */
+    private void applyAxisTitle(com.aspose.words.ChartAxis axis, String text) {
+        boolean visible = text != null && !text.trim().isEmpty();
+        axis.getTitle().setShow(visible);
+        if (visible) {
+            axis.getTitle().setText(text.trim());
+            axis.getTitle().setOverlay(false);
+            applyChartFont(axis.getTitle().getFont());
+        }
+    }
+
+    /** 使用当前正文样式为图表中文、英文和数字分别设置字体。 */
+    private void applyChartFont(com.aspose.words.Font font) {
+        ParagraphStyle style = styleRegistry.getParagraphStyle(DEFAULT_PARAGRAPH_STYLE);
+        if (style == null) return;
+        font.setNameAscii(style.getAsciiFontFamily());
+        font.setNameFarEast(style.getFarEastFontFamily());
+        font.setSize(style.getFontSize());
+    }
+
+    /** 将内部图表类型转换为 Aspose 类型。 */
+    private int toAsposeChartType(ChartNode chart) {
+        switch (chart.getChartType()) {
+            case BAR: return com.aspose.words.ChartType.BAR;
+            case PIE: return com.aspose.words.ChartType.PIE;
+            case LINE: return com.aspose.words.ChartType.LINE;
+            case RADAR: return com.aspose.words.ChartType.RADAR;
+            case COLUMN:
+            default: return com.aspose.words.ChartType.COLUMN;
+        }
+    }
+
+    /** 将内部图例位置转换为 Aspose 位置。 */
+    private int toAsposeLegendPosition(ChartLegendPosition position) {
+        if (position == null) return LegendPosition.BOTTOM;
+        switch (position) {
+            case TOP: return LegendPosition.TOP;
+            case LEFT: return LegendPosition.LEFT;
+            case RIGHT: return LegendPosition.RIGHT;
+            case BOTTOM:
+            default: return LegendPosition.BOTTOM;
+        }
     }
 
     /** 渲染段落样式、列表格式和行内节点。 */
@@ -904,6 +1013,8 @@ public class AsposeDocxRenderer implements DocxRenderer {
             insertImage((ImageInline) inline, builder);
         } else if (inline instanceof VisioInline) {
             insertVisio((VisioInline) inline, builder);
+        } else if (inline instanceof ChartInline) {
+            insertChart(((ChartInline) inline).getChart(), context);
         }
     }
 

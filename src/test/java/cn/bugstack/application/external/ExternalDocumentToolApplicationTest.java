@@ -32,6 +32,8 @@ class ExternalDocumentToolApplicationTest {
                 .path("diagramBlock").path("properties").path("definition").path("$ref").asText());
         assertEquals("object", documentTool.getInputSchema().path("$defs")
                 .path("diagramSpec").path("type").asText());
+        assertEquals("chart", documentTool.getInputSchema().path("$defs")
+                .path("chartBlock").path("properties").path("type").path("const").asText());
         ExternalToolResult listed = application.call(ExternalDocumentToolApplication.LIST_TEMPLATES,
                 mapper.createObjectNode());
         assertEquals("system.assessment",

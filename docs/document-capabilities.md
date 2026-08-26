@@ -18,6 +18,7 @@
 | PNG/JPEG 图片 | 受信路径/业务对象 | 模板可使用受信来源 | 只能使用主体私有 `assetId` |
 | 流程图、ER、系统 ER、用例等图 | 支持 | 内联 DiagramSpec 或工件 ID | 通过 `omni_diagram_generate` 或内联定义 |
 | Word 内可编辑 Visio | 支持 | `EDITABLE_VISIO` | `EDITABLE_VISIO` |
+| Word 原生可编辑图表 | `section.chart` 或 `section.paragraph().chart`；多系列对比 | `chart` block | 通过 `omni_document_export` 的 `chart` block |
 | 单元格内复合块 | 支持 | 暂不支持 | 暂不支持 |
 | 题注交叉引用、书签、超链接 | 支持/可扩展 | 暂不支持 | 暂不支持 |
 | 自定义业务语义元素 | 支持扩展编译器 | 不开放 | 不开放 |
@@ -28,6 +29,11 @@
 表格合并使用零基坐标；`startRow=0` 表示表头。`rowSpan` 与 `columnSpan` 至少一个大于 1，合并区域不能重叠
 或越界。只有区域左上角可以包含文本，其余逻辑单元格必须传空字符串，避免合并时静默丢弃内容。
 `columnWidths` 表示相对比例而非固定磅值；表格总宽度始终占满当前页面正文的可用宽度。
+
+图表数据使用 `categories + series[]` 矩阵。每个系列的 `values` 数量必须与分类数量一致；饼图只能有一个系列。
+对比图可使用多系列 `COLUMN`/`BAR`，或使用单分类、单系列 `BAR` 表达横向单指标单样本结果。
+图表不接受路径或任意脚本，外部 MCP/Function Calling 直接复用
+DocumentSpec Schema，因此不需要增加独立图表生成工具。
 
 AI 的两类运行策略：
 

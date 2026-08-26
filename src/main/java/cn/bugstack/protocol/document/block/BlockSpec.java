@@ -14,6 +14,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
         @JsonSubTypes.Type(value = TableBlockSpec.class, name = "table"),
         @JsonSubTypes.Type(value = ImageBlockSpec.class, name = "image"),
         @JsonSubTypes.Type(value = DiagramBlockSpec.class, name = "diagram"),
+        @JsonSubTypes.Type(value = ChartBlockSpec.class, name = "chart"),
         @JsonSubTypes.Type(value = SubsectionBlockSpec.class, name = "subsection"),
         @JsonSubTypes.Type(value = PageBreakBlockSpec.class, name = "pageBreak")
 })

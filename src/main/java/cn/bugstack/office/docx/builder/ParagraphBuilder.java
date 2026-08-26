@@ -2,6 +2,9 @@ package cn.bugstack.office.docx.builder;
 
 import cn.bugstack.office.docx.model.CaptionRefInline;
 import cn.bugstack.office.docx.model.CaptionType;
+import cn.bugstack.office.docx.model.ChartInline;
+import cn.bugstack.office.docx.model.ChartNode;
+import cn.bugstack.office.docx.model.ChartType;
 import cn.bugstack.office.docx.model.ImageInline;
 import cn.bugstack.office.docx.model.ParagraphListType;
 import cn.bugstack.office.docx.model.ParagraphNode;
@@ -185,6 +188,23 @@ public class ParagraphBuilder<P> {
                                               double widthPoints, double heightPoints) {
         paragraph.addInline(VisioInline.embedded(vsdxSource, previewSource, widthPoints, heightPoints));
         return this;
+    }
+
+    /**
+     * 向当前段落追加 Word 原生可编辑图表。
+     *
+     * <p>图表 Builder 的 {@code end()} 返回当前 Paragraph Builder，因此完整链式写法为
+     * {@code section.paragraph().chart(type)...end().end()}。</p>
+     *
+     * @param type 柱状图、条形图、饼图、折线图或雷达图
+     * @return 图表 Builder
+     */
+    public ChartBuilder<ParagraphBuilder<P>> chart(ChartType type) {
+        if (type == null) throw new IllegalArgumentException("inline chart type must not be null");
+        ChartNode chart = new ChartNode();
+        chart.setChartType(type);
+        paragraph.addInline(new ChartInline(chart));
+        return new ChartBuilder<>(this, chart);
     }
 
     /**

@@ -133,6 +133,17 @@ public final class ReportSectionBuilder {
     }
 
     /**
+     * 开始构建 Word 原生图表。
+     *
+     * @param type 图表类型
+     * @return 图表构建器
+     */
+    public ReportChartBuilder chart(ReportChartType type) {
+        if (type == null) throw new IllegalArgumentException("report chart type must not be null");
+        return new ReportChartBuilder(this, type);
+    }
+
+    /**
      * 追加图片及可选图题。
      *
      * @param source 图片来源

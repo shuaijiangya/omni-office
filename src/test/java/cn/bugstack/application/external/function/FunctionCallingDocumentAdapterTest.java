@@ -30,15 +30,21 @@ class FunctionCallingDocumentAdapterTest {
 
         ObjectNode arguments;
         try (InputStream input = getClass().getResourceAsStream(
-                "/document-spec/1.0/example-simple.json")) {
+                "/document-spec/1.0/example-charts.json")) {
             assertNotNull(input);
             arguments = (ObjectNode) mapper.readTree(input);
         }
+        ObjectNode chart = (ObjectNode) arguments.path("sections").get(0).path("blocks").get(0);
+        chart.putNull("categoryAxisTitle");
+        chart.put("valueAxisTitle", "");
+        ((ObjectNode) chart.path("series").get(0)).putNull("name");
+        ((ObjectNode) chart.path("series").get(1)).put("name", "");
         arguments.put("outputFormat", "DOCX");
         JsonNode result = mapper.readTree(adapter.invoke(
                 ExternalDocumentToolApplication.EXPORT_DOCUMENT, arguments.toString()));
         byte[] content = adapter.readResource(result.path("artifact").path("resourceUri").asText());
         assertEquals((byte) 'P', content[0]);
         assertEquals((byte) 'K', content[1]);
+        assertTrue(tools.toString().contains("chartBlock"));
     }
 }

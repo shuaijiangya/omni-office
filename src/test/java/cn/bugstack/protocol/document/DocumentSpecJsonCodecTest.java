@@ -1,6 +1,7 @@
 package cn.bugstack.protocol.document;
 
 import cn.bugstack.protocol.document.block.BulletListBlockSpec;
+import cn.bugstack.protocol.document.block.ChartBlockSpec;
 import cn.bugstack.protocol.document.block.ParagraphBlockSpec;
 import cn.bugstack.protocol.document.block.SubsectionBlockSpec;
 import cn.bugstack.protocol.document.block.TableBlockSpec;
@@ -23,6 +24,7 @@ class DocumentSpecJsonCodecTest {
     void readsPublishedExamplesAndPreservesPolymorphicBlocks() {
         DocumentSpec simple = codec.read(resource("/document-spec/1.0/example-simple.json"));
         DocumentSpec complete = codec.read(resource("/document-spec/1.0/example-complete.json"));
+        DocumentSpec charts = codec.read(resource("/document-spec/1.0/example-charts.json"));
 
         assertEquals(DocumentSpecVersion.V1, simple.getSchemaVersion());
         assertEquals("系统评估报告", simple.getMetadata().getTitle());
@@ -49,6 +51,16 @@ class DocumentSpecJsonCodecTest {
         assertEquals(complete.getSections().get(0).getBlocks().size(),
                 roundTrip.getSections().get(0).getBlocks().size());
         assertTrue(!codec.write(simple).contains(": null"));
+        assertTrue(charts.getSections().get(0).getBlocks().get(0) instanceof ChartBlockSpec);
+        ChartBlockSpec chart = (ChartBlockSpec) charts.getSections().get(0).getBlocks().get(0);
+        assertEquals("COLUMN", chart.getChartType());
+        assertEquals(2, chart.getSeries().size());
+        ChartBlockSpec horizontalSingleSample =
+                (ChartBlockSpec) charts.getSections().get(0).getBlocks().get(1);
+        assertEquals("BAR", horizontalSingleSample.getChartType());
+        assertEquals(1, horizontalSingleSample.getCategories().size());
+        assertEquals(1, horizontalSingleSample.getSeries().size());
+        assertEquals(1, horizontalSingleSample.getSeries().get(0).getValues().size());
     }
 
     @Test
@@ -77,7 +89,7 @@ class DocumentSpecJsonCodecTest {
 
         assertEquals("1.0", schema.path("properties").path("schemaVersion").path("const").asText());
         assertEquals("1.0", capabilities.path("schemaVersion").asText());
-        assertEquals(8, capabilities.path("blocks").size());
+        assertEquals(9, capabilities.path("blocks").size());
     }
 
     private InputStream resource(String path) {
