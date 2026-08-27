@@ -1,8 +1,12 @@
 package cn.bugstack.export.example;
 
+import com.aspose.words.CellMerge;
 import com.aspose.words.Document;
+import com.aspose.words.NodeCollection;
+import com.aspose.words.NodeType;
 import com.aspose.words.Paragraph;
 import com.aspose.words.Section;
+import com.aspose.words.Table;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -57,6 +61,25 @@ class AssessmentReportExportExampleTest {
     }
 
     /**
+     * 验证两行重复的“通过”可以由合并配置收敛为一个纵向合并单元格。
+     *
+     * @throws Exception 示例文档生成或读取失败时抛出
+     */
+    @Test
+    void mergesRepeatedAssessmentConclusionContent() throws Exception {
+        AssessmentReportExportExample.main(new String[0]);
+
+        Document document = new Document("target/assessment-report-example.docx");
+        Table table = findTable(document, "架构边界");
+
+        assertEquals(CellMerge.FIRST,
+                table.getRows().get(1).getCells().get(1).getCellFormat().getVerticalMerge());
+        assertEquals(CellMerge.PREVIOUS,
+                table.getRows().get(2).getCells().get(1).getCellFormat().getVerticalMerge());
+        assertEquals("通过", table.getRows().get(1).getCells().get(1).getText().trim());
+    }
+
+    /**
      * 验证指定标题使用 Word 原生列表编号。
      *
      * @param document 已更新列表标签的 Word 文档
@@ -89,5 +112,17 @@ class AssessmentReportExportExampleTest {
             }
         }
         throw new AssertionError("body section does not contain a non-empty paragraph");
+    }
+
+    /** 查找包含指定文本的表格。 */
+    private Table findTable(Document document, String text) {
+        NodeCollection tables = document.getChildNodes(NodeType.TABLE, true);
+        for (int index = 0; index < tables.getCount(); index++) {
+            Table table = (Table) tables.get(index);
+            if (table.getText().contains(text)) {
+                return table;
+            }
+        }
+        throw new AssertionError("table not found: " + text);
     }
 }

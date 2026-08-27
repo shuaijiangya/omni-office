@@ -126,6 +126,7 @@ public final class AssessmentReportExportExample {
                     .widths(130, 100, 260)
                     .row("架构边界", "通过", "模块职责清晰，导出层与渲染层已隔离。")
                     .row("可维护性", "通过", "新增模块可通过策略注册表独立接入。")
+                    .merge(1,1,2,1)
                     .caption("评估概览", true)
                     .end();
         }

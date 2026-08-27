@@ -306,8 +306,10 @@ Times New Roman（新罗马）。`TableStyle` 分别提供 `headerTextStyle` 与
 `columnWidths` 作为列宽比例权重，
 例如 `[1, 2, 1]` 表示三列分别占 25%、50%、25%，未配置时各列等宽。表格通过 `alignment` 设置
 `LEFT/CENTER/RIGHT`，通过 `merges` 描述矩形合并区域；表格、图片和图形
-通过 `captionPosition` 设置题注位于 `ABOVE` 或 `BELOW`。合并坐标包含表头行，且区域内只有左上角
-允许包含文本，完整写法见 `example-complete.json`。
+通过 `captionPosition` 设置题注位于 `ABOVE` 或 `BELOW`。合并坐标包含表头行；区域内除左上角外的
+单元格可以为空或重复左上角内容，但不能包含不同内容，完整写法见 `example-complete.json`；
+Java Builder、DocumentSpec、AI、Function Calling、MCP 和底层 `office.docx` 的完整示例见
+**[表格合并单元格使用指南](docs/table-cell-merge-guide.md)**。
 
 上述字体只是内置默认值，并非渲染器固定值。业务 Builder 可通过
 `headerTextStyle/bodyTextStyle` 动态覆盖，DocumentSpec 也接受相同字段：

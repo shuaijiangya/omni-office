@@ -224,6 +224,7 @@
     },
     "tableMerge": {
       "type": "object",
+      "description": "Merge coordinates include the header at row 0. Follower cells may be blank or repeat the top-left value; different content is rejected.",
       "additionalProperties": false,
       "required": ["startRow", "startColumn", "rowSpan", "columnSpan"],
       "properties": {

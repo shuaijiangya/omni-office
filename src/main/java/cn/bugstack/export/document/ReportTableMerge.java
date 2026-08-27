@@ -3,7 +3,8 @@ package cn.bugstack.export.document;
 /**
  * 报告表格中的矩形合并区域。
  *
- * <p>行坐标包含表头，表头为第 {@code 0} 行；列坐标从 {@code 0} 开始。</p>
+ * <p>行坐标包含表头，表头为第 {@code 0} 行；列坐标从 {@code 0} 开始。合并区域内除左上角外的
+ * 单元格可以为空，也可以重复左上角内容；不同内容会在渲染前被校验器拒绝。</p>
  */
 public final class ReportTableMerge {
 

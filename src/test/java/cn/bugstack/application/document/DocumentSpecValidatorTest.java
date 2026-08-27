@@ -105,7 +105,23 @@ class DocumentSpecValidatorTest {
     }
 
     @Test
-    void rejectsOverlappingMergesNonEmptyFollowersAndInvalidColor() {
+    void acceptsRectangularMergeWithRepeatedFollowerContent() {
+        DocumentSpec spec = validSpec();
+        TableBlockSpec table = new TableBlockSpec();
+        table.setHeaders(Arrays.asList("分组", "名称", "状态"));
+        table.setRows(Arrays.asList(
+                Arrays.asList("A", "服务一", "正常"),
+                Arrays.asList("A", "服务二", "正常")));
+        table.setMerges(Collections.singletonList(new TableMergeSpec(1, 0, 2, 1)));
+        spec.getSections().get(0).addBlock(table);
+
+        DocumentSpecValidationResult result = new DocumentSpecValidator().validate(spec);
+
+        assertTrue(result.isValid(), () -> result.getViolations().toString());
+    }
+
+    @Test
+    void rejectsOverlappingMergesDifferentFollowerContentAndInvalidColor() {
         DocumentSpec spec = validSpec();
         TableBlockSpec table = new TableBlockSpec();
         table.setHeaders(Arrays.asList("A", "B", "C"));
@@ -122,7 +138,7 @@ class DocumentSpecValidatorTest {
         assertTrue(result.getViolations().stream().anyMatch(v -> "INVALID_FORMAT".equals(v.getCode())));
         assertTrue(result.getViolations().stream().anyMatch(v -> "OVERLAPPING_MERGE".equals(v.getCode())));
         assertTrue(result.getViolations().stream()
-                .anyMatch(v -> "MERGED_CELL_MUST_BE_EMPTY".equals(v.getCode())));
+                .anyMatch(v -> "MERGED_CELL_CONTENT_MISMATCH".equals(v.getCode())));
     }
 
     @Test

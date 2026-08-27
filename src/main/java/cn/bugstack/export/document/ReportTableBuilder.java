@@ -102,7 +102,8 @@ public final class ReportTableBuilder {
     }
 
     /**
-     * 添加矩形合并区域。行坐标包含表头，表头为第 {@code 0} 行。
+     * 添加矩形合并区域。行坐标包含表头，表头为第 {@code 0} 行。被覆盖单元格可以为空或重复
+     * 左上角内容；若包含不同内容，文档校验会失败。
      *
      * @param startRow 起始行
      * @param startColumn 起始列

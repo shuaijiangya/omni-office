@@ -20,6 +20,7 @@ import cn.bugstack.export.document.ReportTextRangeStyle;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 报告语义树校验器。
@@ -261,6 +262,7 @@ public final class ReportDocumentValidator {
         }
         boolean[][] covered = new boolean[table.getRows().size() + 1][columnCount];
         boolean[][] anchors = new boolean[table.getRows().size() + 1][columnCount];
+        String[][] anchorValues = new String[table.getRows().size() + 1][columnCount];
         for (int mergeIndex = 0; mergeIndex < table.getMerges().size(); mergeIndex++) {
             ReportTableMerge merge = table.getMerges().get(mergeIndex);
             if (merge == null
@@ -284,13 +286,15 @@ public final class ReportDocumentValidator {
                 for (int column = merge.getStartColumn();
                      column < merge.getStartColumn() + merge.getColumnSpan(); column++) {
                     covered[row][column] = true;
+                    anchorValues[row][column] = reportTableCellValue(
+                            table, merge.getStartRow(), merge.getStartColumn());
                 }
             }
             anchors[merge.getStartRow()][merge.getStartColumn()] = true;
         }
         for (int column = 0; column < columnCount; column++) {
             validateReportTableCell(table.getHeaders().get(column), 0, column,
-                    path + "/header[" + column + "]", true, covered, anchors, errors);
+                    path + "/header[" + column + "]", true, covered, anchors, anchorValues, errors);
         }
         for (int row = 0; row < table.getRows().size(); row++) {
             List<String> values = table.getRows().get(row);
@@ -300,24 +304,34 @@ public final class ReportDocumentValidator {
             for (int column = 0; column < columnCount; column++) {
                 validateReportTableCell(values.get(column), row + 1, column,
                         path + "/row[" + row + "]/cell[" + column + "]", false,
-                        covered, anchors, errors);
+                        covered, anchors, anchorValues, errors);
             }
         }
     }
 
     /** 校验 Report 层表格单元格及合并后续内容。 */
     private void validateReportTableCell(String value, int row, int column, String path, boolean header,
-                                         boolean[][] covered, boolean[][] anchors, List<String> errors) {
+                                         boolean[][] covered, boolean[][] anchors, String[][] anchorValues,
+                                         List<String> errors) {
         boolean follower = covered[row][column] && !anchors[row][column];
         if (follower) {
-            if (hasText(value)) {
-                errors.add("merged report table cell must be blank at " + path);
+            if (hasText(value) && !Objects.equals(value, anchorValues[row][column])) {
+                errors.add("merged report table cell must be blank or equal to its top-left cell at " + path);
             }
             return;
         }
         if (value == null || (header && !hasText(value))) {
             errors.add("report table cell must not be null or blank at " + path);
         }
+    }
+
+    /** 按包含表头的逻辑坐标读取表格单元格。 */
+    private String reportTableCellValue(ReportTable table, int row, int column) {
+        if (row == 0) {
+            return table.getHeaders().get(column);
+        }
+        List<String> values = table.getRows().get(row - 1);
+        return values == null || column >= values.size() ? null : values.get(column);
     }
 
     /** 校验可选字体颜色。 */

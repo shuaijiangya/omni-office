@@ -81,6 +81,37 @@ class DefaultReportExporterTest {
     }
 
     @Test
+    void validatorAcceptsRepeatedContentInMergedFollowerCells() {
+        ReportDocument document = new ReportDocument();
+        document.setTitle("Report");
+        ReportSectionBuilder section = ReportSectionBuilder.section("Section");
+        section.table("评估项", "结论", "说明")
+                .row("架构边界", "通过", "职责清晰")
+                .row("可维护性", "通过", "便于扩展")
+                .merge(1, 1, 2, 1)
+                .end();
+        document.getSections().add(section.build());
+
+        assertTrue(new ReportDocumentValidator().validate(document).isEmpty());
+    }
+
+    @Test
+    void validatorRejectsDifferentContentInMergedFollowerCells() {
+        ReportDocument document = new ReportDocument();
+        document.setTitle("Report");
+        ReportSectionBuilder section = ReportSectionBuilder.section("Section");
+        section.table("评估项", "结论", "说明")
+                .row("架构边界", "通过", "职责清晰")
+                .row("可维护性", "不通过", "需要整改")
+                .merge(1, 1, 2, 1)
+                .end();
+        document.getSections().add(section.build());
+
+        assertTrue(new ReportDocumentValidator().validate(document).stream()
+                .anyMatch(error -> error.contains("must be blank or equal to its top-left cell")));
+    }
+
+    @Test
     void exportsBytesThroughSameModuleLifecycle() {
         EchoModule module = new EchoModule();
         ReportModuleRegistry registry = new ReportModuleRegistry().register(module);

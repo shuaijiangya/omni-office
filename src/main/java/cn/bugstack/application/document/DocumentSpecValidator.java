@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -327,7 +328,8 @@ public final class DocumentSpecValidator {
             state.add(path, "LIMIT_EXCEEDED", "total table cell count exceeds " + limits.getMaxTableCells());
         }
         for (int i = 0; i < headers.size(); i++) {
-            validateTableCell(headers.get(i), 0, i, path + "/headers/" + i, mergeCoverage, state);
+            validateTableCell(headers.get(i), 0, i, path + "/headers/" + i,
+                    table, mergeCoverage, state);
         }
         if (table.getRows() != null && table.getRows().size() > limits.getMaxTableRows()) {
             state.add(path + "/rows", "LIMIT_EXCEEDED",
@@ -344,7 +346,8 @@ public final class DocumentSpecValidator {
                 for (int columnIndex = 0; columnIndex < row.size(); columnIndex++) {
                     String cell = row.get(columnIndex);
                     String cellPath = path + "/rows/" + rowIndex + "/" + columnIndex;
-                    validateTableCell(cell, rowIndex + 1, columnIndex, cellPath, mergeCoverage, state);
+                    validateTableCell(cell, rowIndex + 1, columnIndex, cellPath,
+                            table, mergeCoverage, state);
                 }
             }
         }
@@ -411,6 +414,8 @@ public final class DocumentSpecValidator {
                 for (int column = merge.getStartColumn();
                      column < merge.getStartColumn() + merge.getColumnSpan(); column++) {
                     coverage.covered[row][column] = true;
+                    coverage.anchorRows[row][column] = merge.getStartRow();
+                    coverage.anchorColumns[row][column] = merge.getStartColumn();
                 }
             }
             coverage.anchors[merge.getStartRow()][merge.getStartColumn()] = true;
@@ -420,19 +425,30 @@ public final class DocumentSpecValidator {
 
     /** 校验普通、合并起点及合并后续单元格的内容约束。 */
     private void validateTableCell(String value, int row, int column, String path,
-                                   MergeCoverage coverage, ValidationState state) {
+                                   TableBlockSpec table, MergeCoverage coverage, ValidationState state) {
         if (value == null) {
             state.add(path, "REQUIRED", "table cell must not be null");
             return;
         }
         if (coverage.isFollower(row, column)) {
-            if (hasText(value)) {
-                state.add(path, "MERGED_CELL_MUST_BE_EMPTY",
-                        "only the top-left cell of a merge region may contain text");
+            String anchorValue = tableCellValue(table, coverage.anchorRow(row, column),
+                    coverage.anchorColumn(row, column));
+            if (hasText(value) && !Objects.equals(value, anchorValue)) {
+                state.add(path, "MERGED_CELL_CONTENT_MISMATCH",
+                        "a merged follower cell must be blank or equal to its top-left cell");
             }
             return;
         }
         validateText(value, path, row == 0, state);
+    }
+
+    /** 按包含表头的逻辑坐标读取表格单元格。 */
+    private String tableCellValue(TableBlockSpec table, int row, int column) {
+        if (row == 0) {
+            return table.getHeaders().get(column);
+        }
+        List<String> values = table.getRows().get(row - 1);
+        return values == null || column >= values.size() ? null : values.get(column);
     }
 
     private void validateImage(ImageBlockSpec image, String path, ValidationState state) {
@@ -660,15 +676,31 @@ public final class DocumentSpecValidator {
 
         private final boolean[][] covered;
         private final boolean[][] anchors;
+        private final int[][] anchorRows;
+        private final int[][] anchorColumns;
 
         private MergeCoverage(int rows, int columns) {
             this.covered = new boolean[rows][columns];
             this.anchors = new boolean[rows][columns];
+            this.anchorRows = new int[rows][columns];
+            this.anchorColumns = new int[rows][columns];
+            for (int row = 0; row < rows; row++) {
+                Arrays.fill(anchorRows[row], -1);
+                Arrays.fill(anchorColumns[row], -1);
+            }
         }
 
         private boolean isFollower(int row, int column) {
             return row < covered.length && column < covered[row].length
                     && covered[row][column] && !anchors[row][column];
+        }
+
+        private int anchorRow(int row, int column) {
+            return anchorRows[row][column];
+        }
+
+        private int anchorColumn(int row, int column) {
+            return anchorColumns[row][column];
         }
     }
 }

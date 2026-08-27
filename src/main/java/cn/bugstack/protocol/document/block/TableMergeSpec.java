@@ -4,7 +4,7 @@ package cn.bugstack.protocol.document.block;
  * DocumentSpec 表格中的矩形合并区域。
  *
  * <p>{@code startRow} 包含表头行，表头为第 {@code 0} 行；所有坐标均从 {@code 0} 开始。
- * 合并区域内除左上角外的单元格必须传入空字符串，避免内容被静默丢弃。</p>
+ * 合并区域内除左上角外的单元格可以为空，也可以重复左上角内容；不同内容会被拒绝，避免内容被静默丢弃。</p>
  */
 public final class TableMergeSpec {
 
