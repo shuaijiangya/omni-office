@@ -1,6 +1,7 @@
 package cn.bugstack.application.external.http;
 
 import cn.bugstack.application.external.ExternalDocumentToolApplication;
+import cn.bugstack.application.external.ExternalArtifactReference;
 import cn.bugstack.application.external.ResolvedExternalArtifact;
 import cn.bugstack.application.external.ExternalArtifactStoreProvider;
 import cn.bugstack.application.external.LocalExternalArtifactStoreProvider;
@@ -321,6 +322,7 @@ public final class McpHttpServer implements AutoCloseable {
         }
         server.createContext("/mcp", observed("mcp", this::handleMcp));
         server.createContext("/artifacts", observed("artifacts", this::handleArtifact));
+        server.createContext("/v1/source-documents", observed("source_documents", this::handleSourceDocumentUpload));
         server.createContext("/v1/generation-jobs", observed("generation_jobs", this::handleGenerationJobs));
         server.createContext("/v1/document-specs/validate", observed("document_validation",
                 this::handleDocumentValidation));
@@ -593,6 +595,61 @@ public final class McpHttpServer implements AutoCloseable {
             downloadsTotal.incrementAndGet();
         } catch (RuntimeException e) {
             sendText(exchange, 404, "artifact not found");
+        }
+    }
+
+    private void handleSourceDocumentUpload(HttpExchange exchange) throws IOException {
+        requestsTotal.incrementAndGet();
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendProblem(exchange, 405, "METHOD_NOT_ALLOWED", "POST is required");
+            return;
+        }
+        if (!"/v1/source-documents".equals(exchange.getRequestURI().getPath())) {
+            sendProblem(exchange, 404, "SOURCE_ENDPOINT_NOT_FOUND", "source document endpoint not found");
+            return;
+        }
+        if (!validOrigin(exchange)) {
+            sendProblem(exchange, 403, "INVALID_ORIGIN", "invalid Origin");
+            return;
+        }
+        RequestIdentity identity = authenticate(exchange, "source-docx:upload");
+        if (identity == null || !allow(identity, exchange)) return;
+        if (!concurrency.tryAcquire()) {
+            sendProblem(exchange, 503, "SOURCE_UPLOAD_BUSY", "source upload capacity is exhausted");
+            return;
+        }
+        try {
+            String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+            if (contentType == null || !contentType.split(";", 2)[0].trim()
+                    .equals(ExternalDocumentToolApplication.DOCX_MEDIA_TYPE)) {
+                sendProblem(exchange, 415, "UNSUPPORTED_MEDIA_TYPE", "DOCX Content-Type is required");
+                return;
+            }
+            try {
+                byte[] source = readBounded(exchange.getRequestBody(), 25 * 1024 * 1024);
+                ExternalArtifactReference artifact = tenants.require(identity.getTenantId())
+                        .uploadSourceDocx(source, identity.getPrincipalId());
+                ObjectNode response = mapper.createObjectNode();
+                response.put("sourceArtifactId", artifact.getArtifactId());
+                response.put("resourceUri", artifact.getResourceUri());
+                response.put("sha256", artifact.getSha256());
+                response.put("size", artifact.getSize());
+                sendJson(exchange, 201, response);
+                audit(identity, "source_docx.upload", "SUCCESS");
+            } catch (PayloadTooLargeException e) {
+                sendProblem(exchange, 413, "SOURCE_TOO_LARGE", "source DOCX exceeds 25 MiB");
+            } catch (IllegalArgumentException e) {
+                sendProblem(exchange, 422, "SOURCE_DOCX_INVALID", safeMessage(e));
+            } catch (IllegalStateException e) {
+                if (e.getMessage() != null && e.getMessage().contains("requires a configured AI client")) {
+                    sendProblem(exchange, 503, "AI_NOT_CONFIGURED", "source DOCX completion is not configured");
+                } else {
+                    sendProblem(exchange, 500, "SOURCE_DOCX_UPLOAD_FAILED", "source DOCX upload failed");
+                }
+            }
+        } finally {
+            concurrency.release();
         }
     }
 
@@ -1296,6 +1353,7 @@ public final class McpHttpServer implements AutoCloseable {
         value.put("resource", config.getResourceIdentifier().toString());
         value.putArray("authorization_servers").add(config.getAuthorizationServer().toString());
         value.putArray("scopes_supported").add("mcp:invoke").add("artifacts:read")
+                .add("source-docx:upload")
                 .add("artifacts:read:any").add("generation:create").add("generation:read")
                 .add("generation:read:any").add("generation:cancel").add("generation:cancel:any")
                 .add("ai:generate")

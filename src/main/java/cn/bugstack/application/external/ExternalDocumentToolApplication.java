@@ -7,6 +7,9 @@ import cn.bugstack.application.ai.DefaultInternalAiDocumentService;
 import cn.bugstack.application.ai.InternalAiDocumentService;
 import cn.bugstack.application.ai.StructuredAiClient;
 import cn.bugstack.application.ai.AiDocumentResult;
+import cn.bugstack.application.completion.SourceDocxCompletionApplication;
+import cn.bugstack.application.completion.DocumentCompletionPlan;
+import cn.bugstack.application.completion.DocumentStructureSnapshot;
 import cn.bugstack.application.ai.review.AiDraftRecord;
 import cn.bugstack.application.ai.review.FileAiDraftReviewService;
 import cn.bugstack.application.document.DocumentGenerationApplication;
@@ -46,6 +49,8 @@ import java.util.Map;
 import java.util.Base64;
 import java.time.Instant;
 import java.time.Duration;
+import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * M5 共享外部工具门面。
@@ -64,6 +69,12 @@ public final class ExternalDocumentToolApplication {
     public static final String STORE_ASSET = "omni_asset_store";
     public static final String GET_ASSET = "omni_asset_get";
     public static final String DELETE_ASSET = "omni_asset_delete";
+    public static final String ANALYZE_SOURCE_DOCX = "omni_source_docx_analyze";
+    public static final String PLAN_SOURCE_DOCX = "omni_source_docx_plan";
+    public static final String APPLY_SOURCE_DOCX = "omni_source_docx_apply";
+    public static final String DOCX_MEDIA_TYPE =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    private static final int MAX_SOURCE_UPLOAD_BYTES = 25 * 1024 * 1024;
 
     private final ObjectMapper mapper;
     private final DocumentSpecJsonCodec documentCodec;
@@ -76,6 +87,7 @@ public final class ExternalDocumentToolApplication {
     private final Map<String, ExternalToolDefinition> definitions;
     private final ExternalDocumentSpecSafetyValidator externalSafety = new ExternalDocumentSpecSafetyValidator();
     private final DocumentCostEstimator costEstimator = new DocumentCostEstimator();
+    private final SourceDocxCompletionApplication sourceCompletion;
 
     public ExternalDocumentToolApplication(Path artifactRoot) {
         this(artifactRoot, new ObjectMapper());
@@ -87,13 +99,20 @@ public final class ExternalDocumentToolApplication {
 
     public ExternalDocumentToolApplication(Path artifactRoot, DocumentTemplateCatalog templateCatalog,
                                            ExternalArtifactStore outputStore) {
-        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore, Duration.ofDays(30));
+        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore, Duration.ofDays(30), null);
     }
 
     /** 创建输出工件和图中间工件使用相同保留策略的工具门面。 */
     public ExternalDocumentToolApplication(Path artifactRoot, DocumentTemplateCatalog templateCatalog,
                                            ExternalArtifactStore outputStore, Duration retention) {
-        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore, retention);
+        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore, retention, null);
+    }
+
+    /** 创建同时支持上传源 DOCX 智能补全的租户工具门面。 */
+    public ExternalDocumentToolApplication(Path artifactRoot, DocumentTemplateCatalog templateCatalog,
+                                           ExternalArtifactStore outputStore, Duration retention,
+                                           StructuredAiClient aiClient) {
+        this(artifactRoot, new ObjectMapper(), templateCatalog, outputStore, retention, aiClient);
     }
 
     ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper) {
@@ -102,13 +121,13 @@ public final class ExternalDocumentToolApplication {
 
     private ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper,
                                             DocumentTemplateCatalog templateCatalog) {
-        this(artifactRoot, mapper, templateCatalog, null, Duration.ofDays(30));
+        this(artifactRoot, mapper, templateCatalog, null, Duration.ofDays(30), null);
     }
 
     private ExternalDocumentToolApplication(Path artifactRoot, ObjectMapper mapper,
                                             DocumentTemplateCatalog templateCatalog,
                                             ExternalArtifactStore configuredOutputStore,
-                                            Duration retention) {
+                                            Duration retention, StructuredAiClient aiClient) {
         if (artifactRoot == null || mapper == null) {
             throw new IllegalArgumentException("external document tool root and mapper are required");
         }
@@ -128,6 +147,7 @@ public final class ExternalDocumentToolApplication {
         this.outputStore = configuredOutputStore == null
                 ? new LocalExternalArtifactStore(root.resolve("outputs"), retention,
                 new cn.bugstack.application.external.security.BasicArtifactSecurityScanner()) : configuredOutputStore;
+        this.sourceCompletion = aiClient == null ? null : new SourceDocxCompletionApplication(aiClient);
         this.definitions = Collections.unmodifiableMap(createDefinitions());
     }
 
@@ -182,6 +202,12 @@ public final class ExternalDocumentToolApplication {
                 return getAsset(args, owner);
             case DELETE_ASSET:
                 return deleteAsset(args, owner);
+            case ANALYZE_SOURCE_DOCX:
+                return analyzeSourceDocx(args, owner);
+            case PLAN_SOURCE_DOCX:
+                return planSourceDocx(args, owner);
+            case APPLY_SOURCE_DOCX:
+                return applySourceDocx(args, owner);
             default:
                 throw new UnknownExternalToolException(name);
         }
@@ -201,6 +227,24 @@ public final class ExternalDocumentToolApplication {
      */
     public ResolvedExternalArtifact readResource(String resourceUri, String principalId, boolean allowAny) {
         return outputStore.resolveForPrincipal(resourceUri, requirePrincipalId(principalId), allowAny);
+    }
+
+    /** 校验上传文件并存入当前主体私有工件库；不会修改上传内容。 */
+    public ExternalArtifactReference uploadSourceDocx(byte[] content, String principalId) {
+        if (content == null || content.length == 0 || content.length > MAX_SOURCE_UPLOAD_BYTES) {
+            throw new IllegalArgumentException("source DOCX must contain 1 to 26214400 bytes");
+        }
+        requirePrincipalId(principalId);
+        Path source = temporarySource();
+        try {
+            Files.write(source, content);
+            completion().analyze(source);
+            return outputStore.storeForPrincipal(source, "source.docx", DOCX_MEDIA_TYPE, principalId);
+        } catch (IOException e) {
+            throw new IllegalStateException("failed to stage source DOCX", e);
+        } finally {
+            deleteTemporary(source);
+        }
     }
 
     public int purgeExpiredArtifacts(Instant now) {
@@ -402,6 +446,113 @@ public final class ExternalDocumentToolApplication {
         return ExternalToolResult.data(result);
     }
 
+    private ExternalToolResult analyzeSourceDocx(JsonNode arguments, String principalId) {
+        String id = requiredText(arguments, "sourceArtifactId");
+        Integer sectionIndex = optionalSectionIndex(arguments);
+        return withSourceDocx(id, principalId, source -> {
+            DocumentStructureSnapshot snapshot = sectionIndex == null
+                    ? completion().analyze(source) : completion().analyzeSection(source, sectionIndex);
+            ObjectNode response = mapper.valueToTree(snapshot);
+            response.put("fileName", "source.docx");
+            if (response.toString().length() > 1_000_000) {
+                throw new IllegalArgumentException("source structure is too large; specify sectionIndex");
+            }
+            return ExternalToolResult.data(response);
+        });
+    }
+
+    private ExternalToolResult planSourceDocx(JsonNode arguments, String principalId) {
+        String id = requiredText(arguments, "sourceArtifactId");
+        String instruction = requiredText(arguments, "instruction");
+        Integer sectionIndex = optionalSectionIndex(arguments);
+        JsonNode facts = arguments.path("businessFacts");
+        if (!facts.isMissingNode() && !facts.isObject()) {
+            throw new IllegalArgumentException("businessFacts must be an object");
+        }
+        return withSourceDocx(id, principalId, source -> {
+            JsonNode context = facts.isMissingNode() ? mapper.createObjectNode() : facts;
+            DocumentCompletionPlan plan = sectionIndex == null
+                    ? completion().planDocument(source, instruction, context)
+                    : completion().planDocumentSection(source, sectionIndex, instruction, context);
+            return ExternalToolResult.data(completion().reviewablePlan(plan));
+        });
+    }
+
+    private ExternalToolResult applySourceDocx(JsonNode arguments, String principalId) {
+        if (!arguments.path("approved").isBoolean() || !arguments.path("approved").asBoolean()) {
+            throw new IllegalArgumentException("approved=true is required after reviewing the plan");
+        }
+        JsonNode reviewedPlan = requiredObject(arguments, "reviewedPlan");
+        String id = requiredText(arguments, "sourceArtifactId");
+        return withSourceDocx(id, principalId, source -> {
+            Path output = temporaryOutput(ReportOutputFormat.DOCX);
+            try {
+                cn.bugstack.application.completion.DocumentCompletionResult applied =
+                        completion().applyReviewedPlan(source, output, reviewedPlan);
+                ExternalArtifactReference artifact = storeDocument(output, ReportOutputFormat.DOCX, principalId);
+                ObjectNode result = mapper.createObjectNode();
+                result.set("artifact", artifactNode(artifact));
+                ObjectNode counts = result.putObject("result");
+                counts.put("paragraphsChanged", applied.getParagraphsChanged());
+                counts.put("rowsUpdated", applied.getRowsUpdated());
+                counts.put("rowsAppended", applied.getRowsAppended());
+                counts.put("cellsChanged", applied.getCellsChanged());
+                counts.put("runsChanged", applied.getRunsChanged());
+                return ExternalToolResult.artifact(result, artifact);
+            } finally {
+                deleteTemporary(output);
+            }
+        });
+    }
+
+    private SourceDocxCompletionApplication completion() {
+        if (sourceCompletion == null) {
+            throw new IllegalStateException("source DOCX completion requires a configured AI client");
+        }
+        return sourceCompletion;
+    }
+
+    private <T> T withSourceDocx(String sourceArtifactId, String principalId, Function<Path, T> action) {
+        final String id;
+        try {
+            id = UUID.fromString(sourceArtifactId).toString();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("sourceArtifactId must be a UUID", e);
+        }
+        ResolvedExternalArtifact artifact = outputStore.resolveForPrincipal(
+                "omni-office://artifacts/" + id, principalId, false);
+        if (!DOCX_MEDIA_TYPE.equals(artifact.getReference().getMediaType())
+                || !"source.docx".equals(artifact.getReference().getFileName())) {
+            throw new IllegalArgumentException("artifact is not an uploaded source DOCX");
+        }
+        Path source = temporarySource();
+        try {
+            Files.copy(artifact.getContentPath(), source, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return action.apply(source);
+        } catch (IOException e) {
+            throw new IllegalStateException("failed to stage source DOCX", e);
+        } finally {
+            deleteTemporary(source);
+        }
+    }
+
+    private Path temporarySource() {
+        try {
+            return Files.createTempFile("omni-source-", ".docx");
+        } catch (IOException e) {
+            throw new IllegalStateException("failed to create source DOCX staging file", e);
+        }
+    }
+
+    private Integer optionalSectionIndex(JsonNode arguments) {
+        JsonNode index = arguments.get("sectionIndex");
+        if (index == null) return null;
+        if (!index.isIntegralNumber() || !index.canConvertToInt() || index.intValue() < 0) {
+            throw new IllegalArgumentException("sectionIndex must be a nonnegative integer");
+        }
+        return index.intValue();
+    }
+
     private void materializeAssets(DocumentSpec spec, String principalId) {
         if (spec == null || spec.getSections() == null) return;
         for (SectionSpec section : spec.getSections()) materializeAssets(section, principalId);
@@ -542,7 +693,93 @@ public final class ExternalDocumentToolApplication {
         tools.put(DELETE_ASSET, new ExternalToolDefinition(DELETE_ASSET, "删除图片资产",
                 "删除当前主体拥有的图片资产。", assetKeyInputSchema(),
                 deleteAssetOutputSchema(), annotations(false, true)));
+        if (sourceCompletion != null) {
+            tools.put(ANALYZE_SOURCE_DOCX, new ExternalToolDefinition(ANALYZE_SOURCE_DOCX, "分析上传 DOCX",
+                    "解析已上传的原始 DOCX，返回正文段落、表格、单元格、Run 与稳定定位信息；不修改文件。",
+                    sourceAnalyzeInputSchema(), sourceAnalyzeOutputSchema(), annotations(true, true)));
+            tools.put(PLAN_SOURCE_DOCX, new ExternalToolDefinition(PLAN_SOURCE_DOCX, "规划源 DOCX 补全",
+                    "根据用户描述和可信业务事实规划段落、表格、单元格与 Run 补丁；只返回待审核 JSON。",
+                    sourcePlanInputSchema(), sourcePlanOutputSchema(), annotations(false, true)));
+            tools.put(APPLY_SOURCE_DOCX, new ExternalToolDefinition(APPLY_SOURCE_DOCX, "应用已审核 DOCX 补丁",
+                    "明确确认后复核源 SHA-256 与定位信息，生成新 DOCX 工件，不改上传文件。",
+                    sourceApplyInputSchema(), sourceApplyOutputSchema(artifactSchema),
+                    annotations(false, false)));
+        }
         return tools;
+    }
+
+    private JsonNode sourceKeyInputSchema() {
+        ObjectNode schema = emptyObjectSchema();
+        ((ObjectNode) schema.path("properties")).set("sourceArtifactId",
+                nonBlankString("UUID returned by the source DOCX upload endpoint"));
+        schema.putArray("required").add("sourceArtifactId");
+        return schema;
+    }
+
+    private JsonNode sourcePlanInputSchema() {
+        ObjectNode schema = (ObjectNode) sourceKeyInputSchema();
+        ObjectNode properties = (ObjectNode) schema.path("properties");
+        properties.set("instruction", nonBlankString("Natural language completion instruction"));
+        properties.set("businessFacts", mapper.createObjectNode().put("type", "object"));
+        properties.set("sectionIndex", integerSchema(0));
+        ((ArrayNode) schema.path("required")).add("instruction");
+        return schema;
+    }
+
+    private JsonNode sourceAnalyzeInputSchema() {
+        ObjectNode schema = (ObjectNode) sourceKeyInputSchema();
+        ((ObjectNode) schema.path("properties")).set("sectionIndex", integerSchema(0));
+        return schema;
+    }
+
+    private JsonNode sourceApplyInputSchema() {
+        ObjectNode schema = (ObjectNode) sourceKeyInputSchema();
+        ObjectNode properties = (ObjectNode) schema.path("properties");
+        properties.set("reviewedPlan", mapper.createObjectNode().put("type", "object"));
+        properties.set("approved", mapper.createObjectNode().put("type", "boolean"));
+        ((ArrayNode) schema.path("required")).add("reviewedPlan").add("approved");
+        return schema;
+    }
+
+    private JsonNode sourceAnalyzeOutputSchema() {
+        ObjectNode schema = emptyObjectSchema();
+        ObjectNode properties = (ObjectNode) schema.path("properties");
+        properties.set("fileName", nonBlankString("Sanitized source file name"));
+        properties.set("sha256", nonBlankString("Source SHA-256"));
+        properties.set("tables", mapper.createObjectNode().put("type", "array"));
+        properties.set("paragraphs", mapper.createObjectNode().put("type", "array"));
+        schema.putArray("required").add("fileName").add("sha256").add("tables").add("paragraphs");
+        return schema;
+    }
+
+    private JsonNode sourcePlanOutputSchema() {
+        ObjectNode schema = emptyObjectSchema();
+        ObjectNode properties = (ObjectNode) schema.path("properties");
+        properties.set("status", nonBlankString("READY or NEEDS_INPUT"));
+        properties.set("sourceSha256", nonBlankString("Source SHA-256"));
+        for (String name : List.of("paragraphPatches", "tablePatches", "cellPatches", "runPatches", "questions")) {
+            properties.set(name, mapper.createObjectNode().put("type", "array"));
+        }
+        properties.set("confidence", mapper.createObjectNode().put("type", "number"));
+        properties.set("reason", mapper.createObjectNode().put("type", "string"));
+        schema.putArray("required").add("status").add("sourceSha256").add("paragraphPatches")
+                .add("tablePatches").add("cellPatches").add("runPatches").add("questions")
+                .add("confidence").add("reason");
+        return schema;
+    }
+
+    private JsonNode sourceApplyOutputSchema(JsonNode artifactSchema) {
+        ObjectNode schema = (ObjectNode) wrapperOutputSchema("artifact", artifactSchema);
+        ObjectNode counts = emptyObjectSchema();
+        ObjectNode properties = (ObjectNode) counts.path("properties");
+        ArrayNode required = counts.putArray("required");
+        for (String name : List.of("paragraphsChanged", "rowsUpdated", "rowsAppended", "cellsChanged", "runsChanged")) {
+            properties.set(name, integerSchema(0));
+            required.add(name);
+        }
+        ((ObjectNode) schema.path("properties")).set("result", counts);
+        ((ArrayNode) schema.path("required")).add("result");
+        return schema;
     }
 
     private JsonNode documentExportInputSchema() {

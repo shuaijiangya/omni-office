@@ -11,6 +11,9 @@ DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 
 >
 > 长期使用 Aspose.Words 的项目可直接参考
 > **[Aspose.Words 到 omni-office 迁移对照指南](docs/aspose-words-migration-guide.md)**。
+>
+> 上传已有 Word 后由 AI 和 Function Calling 精准补充表格，请查看
+> **[上传 DOCX 的 AI 识别与精准补全](docs/source-docx-ai-completion.md)**（含[复杂文档完整补全示例](docs/complex-source-docx-sample.md)、[功能验证](docs/source-docx-completion-verification.md)与[本地 Ollama 多样本实测](docs/source-docx-ollama-live-verification.md)）。
 
 ## 核心特性
 
@@ -35,6 +38,7 @@ DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 
 - Function Calling、MCP stdio 与 MCP Streamable HTTP 复用同一个外部工具业务门面。
 - 支持 API Key/JWT、Origin、会话、限流、多租户、受控下载、审计及异步 MCP Tasks。
 - 支持模板审核发布、Schema 兼容迁移、AI 评测/人工审批和产物安全生命周期。
+- 支持经 REST 上传现有 DOCX，调用 MCP/Function 工具分析正文和表格、规划待审核补丁，确认后确定性写回新工件；Java 本地入口另支持白名单业务函数取数。
 
 ## 端到端链路
 

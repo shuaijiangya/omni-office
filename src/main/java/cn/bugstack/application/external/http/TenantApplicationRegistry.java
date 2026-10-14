@@ -323,7 +323,7 @@ public final class TenantApplicationRegistry implements AutoCloseable {
         Path root = tenantRoot(tenantId);
         FileDocumentTemplateCatalog catalog = new FileDocumentTemplateCatalog(root.resolve("templates"));
         ExternalDocumentToolApplication application = new ExternalDocumentToolApplication(
-                root, catalog, artifactStores.store(tenantId, root), artifactStores.retention());
+                root, catalog, artifactStores.store(tenantId, root), artifactStores.retention(), aiClient);
         registerClasspathTemplate(application, catalog,
                 "/document-template/1.0/example-assessment-template.json");
         registerClasspathTemplate(application, catalog,

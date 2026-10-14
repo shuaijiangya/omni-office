@@ -12,6 +12,7 @@
     "rest": {
       "openapi": "/v1/openapi.json",
       "generationJobs": "/v1/generation-jobs",
+      "sourceDocuments": "/v1/source-documents",
       "asynchronous": true,
       "idempotencyKey": true,
       "correlationId": true
@@ -30,7 +31,7 @@
   ],
   "operationsEndpoints": [
     "/health/live", "/health/ready", "/metrics", "/artifacts/{artifactId}",
-    "/v1/generation-jobs", "/v1/generation-jobs/{jobId}/approve", "/v1/generation-jobs/{jobId}/reject", "/v1/document-specs/validate",
+    "/v1/generation-jobs", "/v1/generation-jobs/{jobId}/approve", "/v1/generation-jobs/{jobId}/reject", "/v1/document-specs/validate", "/v1/source-documents",
     "/v1/templates/{templateId}/versions/{version}/validate-data",
     "/v1/admin/templates", "/v1/admin/operations/summary",
     "/v1/webhook-deliveries", "/v1/webhook-deliveries/{eventId}/redrive", "/v1/openapi.json"
@@ -76,6 +77,15 @@
     "controlledResourceUri": true,
     "managedImageAssetTools": ["omni_asset_store", "omni_asset_get", "omni_asset_delete"],
     "streamingFilePublication": true
+  },
+  "sourceDocxCompletion": {
+    "optionalWithStructuredAi": true,
+    "uploadEndpoint": "/v1/source-documents",
+    "uploadScope": "source-docx:upload",
+    "maximumUploadBytes": 26214400,
+    "mcpAndFunctionTools": ["omni_source_docx_analyze", "omni_source_docx_plan", "omni_source_docx_apply"],
+    "requiresReviewedPlanAndApproval": true,
+    "sourceSha256CheckedAtApply": true
   },
   "oauthProtectedResourceMetadata": {
     "endpoint": "/.well-known/oauth-protected-resource",

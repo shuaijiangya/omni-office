@@ -1,6 +1,12 @@
 package cn.bugstack.application.external.http;
 
 import cn.bugstack.application.external.ExternalDocumentToolApplication;
+import cn.bugstack.application.external.LocalExternalArtifactStoreProvider;
+import cn.bugstack.application.audit.AuditLog;
+import cn.bugstack.application.generation.FileGenerationJobRepositoryProvider;
+import cn.bugstack.application.generation.GenerationQuotaPolicy;
+import com.aspose.words.Document;
+import com.aspose.words.DocumentBuilder;
 import cn.bugstack.application.external.security.RequestIdentity;
 import cn.bugstack.application.external.security.StaticApiKeyAuthenticator;
 import cn.bugstack.application.external.security.HttpAuthenticationRequest;
@@ -29,6 +35,93 @@ class McpHttpServerTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient client = HttpClient.newHttpClient();
+
+    @Test
+    void uploadsValidSourceDocxToOwnerScopedArtifact() throws Exception {
+        java.nio.file.Path root = Files.createTempDirectory("mcp-source-upload");
+        java.nio.file.Path source = root.resolve("input.docx");
+        Document document = new Document();
+        new DocumentBuilder(document).writeln("待补充章节");
+        document.save(source.toString());
+        McpHttpServerConfig config = new McpHttpServerConfig(new InetSocketAddress("127.0.0.1", 0),
+                root, Collections.emptySet(), 2 * 1024 * 1024,
+                500, 4, Duration.ofSeconds(30), Duration.ofMinutes(5));
+        Map<String, RequestIdentity> keys = new LinkedHashMap<>();
+        java.util.Set<String> scopes = java.util.Set.of("source-docx:upload", "artifacts:read", "mcp:invoke");
+        keys.put("alice-key-1", new RequestIdentity("tenant-a", "alice", scopes));
+        keys.put("bob-key-1", new RequestIdentity("tenant-a", "bob", scopes));
+        cn.bugstack.application.ai.StructuredAiClient model = request -> {
+            String anchor = "";
+            for (JsonNode paragraph : request.getContext().path("document").path("paragraphs")) {
+                if (paragraph.path("text").asText().contains("待补充章节")) {
+                    anchor = paragraph.path("paragraphId").asText();
+                }
+            }
+            assertFalse(anchor.isBlank());
+            return "{\"status\":\"READY\",\"paragraphPatches\":[{\"paragraphId\":\"" + anchor
+                    + "\",\"operation\":\"REPLACE_TEXT\",\"overwritePolicy\":\"OVERWRITE_ALL\","
+                    + "\"texts\":[\"已确认的设计内容\"]}],\"tablePatches\":[],"
+                    + "\"confidence\":0.95,\"reason\":\"事实已确认\",\"questions\":[]}";
+        };
+        try (McpHttpServer server = new McpHttpServer(config, new StaticApiKeyAuthenticator(keys),
+                AuditLog.noop(), new FileGenerationJobRepositoryProvider(root),
+                new LocalExternalArtifactStoreProvider(), GenerationQuotaPolicy.unlimited(),
+                Duration.ofDays(30), Duration.ofDays(30), model)) {
+            server.start();
+            URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
+                    + "/v1/source-documents");
+            HttpRequest upload = HttpRequest.newBuilder(endpoint).header("X-API-Key", "alice-key-1")
+                    .header("Content-Type", ExternalDocumentToolApplication.DOCX_MEDIA_TYPE)
+                    .POST(HttpRequest.BodyPublishers.ofFile(source)).build();
+            HttpResponse<byte[]> response = client.send(upload, HttpResponse.BodyHandlers.ofByteArray());
+            assertEquals(201, response.statusCode());
+            String id = mapper.readTree(response.body()).path("sourceArtifactId").asText();
+            assertFalse(id.isBlank());
+            URI download = endpoint.resolve("/artifacts/" + id);
+            assertEquals(200, get(download, "alice-key-1").statusCode());
+            assertEquals(404, get(download, "bob-key-1").statusCode());
+            assertEquals(415, client.send(HttpRequest.newBuilder(endpoint)
+                    .header("X-API-Key", "alice-key-1").header("Content-Type", "text/plain")
+                    .POST(HttpRequest.BodyPublishers.ofString("bad"))
+                    .build(), HttpResponse.BodyHandlers.ofByteArray()).statusCode());
+            assertEquals(422, client.send(HttpRequest.newBuilder(endpoint)
+                    .header("X-API-Key", "alice-key-1")
+                    .header("Content-Type", ExternalDocumentToolApplication.DOCX_MEDIA_TYPE)
+                    .POST(HttpRequest.BodyPublishers.ofString("not a DOCX"))
+                    .build(), HttpResponse.BodyHandlers.ofByteArray()).statusCode());
+
+            URI mcpEndpoint = endpoint.resolve("/mcp");
+            HttpResponse<byte[]> initialized = post(mcpEndpoint, "alice-key-1", null, initialize());
+            String session = initialized.headers().firstValue("MCP-Session-Id").orElseThrow();
+            assertEquals(202, post(mcpEndpoint, "alice-key-1", session, notification()).statusCode());
+            ObjectNode analyze = request(2, "tools/call");
+            analyze.putObject("params").put("name", ExternalDocumentToolApplication.ANALYZE_SOURCE_DOCX)
+                    .set("arguments", mapper.createObjectNode().put("sourceArtifactId", id));
+            assertFalse(json(post(mcpEndpoint, "alice-key-1", session, analyze))
+                    .path("result").path("structuredContent").path("paragraphs").isEmpty());
+
+            ObjectNode planCall = request(3, "tools/call");
+            planCall.putObject("params").put("name", ExternalDocumentToolApplication.PLAN_SOURCE_DOCX)
+                    .set("arguments", mapper.createObjectNode().put("sourceArtifactId", id)
+                            .put("instruction", "根据已确认事实填写设计内容")
+                            .set("businessFacts", mapper.createObjectNode().put("content", "已确认的设计内容")));
+            JsonNode plan = json(post(mcpEndpoint, "alice-key-1", session, planCall))
+                    .path("result").path("structuredContent");
+            assertEquals("READY", plan.path("status").asText());
+            ObjectNode applyCall = request(4, "tools/call");
+            applyCall.putObject("params").put("name", ExternalDocumentToolApplication.APPLY_SOURCE_DOCX)
+                    .set("arguments", mapper.createObjectNode().put("sourceArtifactId", id)
+                            .put("approved", true).set("reviewedPlan", plan));
+            JsonNode completed = json(post(mcpEndpoint, "alice-key-1", session, applyCall))
+                    .path("result").path("structuredContent");
+            assertFalse(completed.has("outputPath"));
+            assertFalse(completed.path("result").has("outputPath"));
+            String outputId = completed.path("artifact").path("artifactId").asText();
+            assertFalse(outputId.isBlank());
+            assertEquals(200, get(endpoint.resolve("/artifacts/" + outputId), "alice-key-1").statusCode());
+            assertEquals(404, get(endpoint.resolve("/artifacts/" + outputId), "bob-key-1").statusCode());
+        }
+    }
 
     @Test
     void authenticatesSessionsRunsAsyncToolsAndIsolatesTenantArtifacts() throws Exception {

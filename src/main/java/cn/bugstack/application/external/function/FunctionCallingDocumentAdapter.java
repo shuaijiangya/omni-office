@@ -57,7 +57,17 @@ public final class FunctionCallingDocumentAdapter {
         return application.call(functionName, arguments);
     }
 
+    /** 在外部服务已认证主体的权限范围内调用函数；源文档与输出工件不会跨主体共享。 */
+    public ExternalToolResult invoke(String functionName, JsonNode arguments, String principalId) {
+        return application.call(functionName, arguments, principalId);
+    }
+
     public String invoke(String functionName, String argumentsJson) {
+        return invoke(functionName, argumentsJson, "system");
+    }
+
+    /** 使用调用方主体解析 JSON 参数并返回结构化函数结果。 */
+    public String invoke(String functionName, String argumentsJson, String principalId) {
         if (argumentsJson == null || argumentsJson.trim().isEmpty()) {
             throw new IllegalArgumentException("function arguments JSON must not be blank");
         }
@@ -66,7 +76,7 @@ public final class FunctionCallingDocumentAdapter {
             if (arguments == null || !arguments.isObject()) {
                 throw new IllegalArgumentException("function arguments JSON root must be an object");
             }
-            return writeJson(invoke(functionName, arguments).getStructuredContent());
+            return writeJson(invoke(functionName, arguments, principalId).getStructuredContent());
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("invalid function arguments JSON: " + e.getOriginalMessage(), e);
         }
@@ -74,11 +84,16 @@ public final class FunctionCallingDocumentAdapter {
 
     /** 供承载 Function Calling 的业务网关把资源 URI 转换为下载响应。 */
     public byte[] readResource(String resourceUri) {
-        ResolvedExternalArtifact artifact = application.readResource(resourceUri);
+        return readResource(resourceUri, "system");
+    }
+
+    /** 仅允许读取指定主体拥有的函数输出工件。 */
+    public byte[] readResource(String resourceUri, String principalId) {
+        ResolvedExternalArtifact artifact = application.readResource(resourceUri, principalId, false);
         try {
             return Files.readAllBytes(artifact.getContentPath());
         } catch (IOException e) {
-            throw new IllegalStateException("failed to read generated function artifact", e);
+            throw new IllegalStateException("failed to read external document artifact", e);
         }
     }
 

@@ -25,6 +25,20 @@
         }
       }
     },
+    "/v1/source-documents": {
+      "post": {
+        "operationId": "uploadSourceDocx",
+        "description": "Requires source-docx:upload. Available when a structured AI client is configured. Stores a validated DOCX as a principal-owned artifact; use the optional MCP/Function tools omni_source_docx_analyze, omni_source_docx_plan and omni_source_docx_apply to complete it.",
+        "requestBody": {"required": true, "content": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document": {"schema": {"type": "string", "format": "binary"}}}},
+        "responses": {
+          "201": {"description": "Owned source DOCX artifact", "content": {"application/json": {"schema": {"type": "object", "properties": {"sourceArtifactId": {"type": "string", "format": "uuid"}, "resourceUri": {"type": "string"}, "sha256": {"type": "string"}, "size": {"type": "integer"}}, "required": ["sourceArtifactId", "resourceUri", "sha256", "size"]}}}},
+          "413": {"$ref": "#/components/responses/Problem"},
+          "415": {"$ref": "#/components/responses/Problem"},
+          "422": {"$ref": "#/components/responses/Problem"},
+          "503": {"$ref": "#/components/responses/Problem"}
+        }
+      }
+    },
     "/v1/templates/{templateId}/versions/{templateVersion}/validate-data": {
       "post": {
         "operationId": "validateTemplateData",

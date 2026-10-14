@@ -41,7 +41,7 @@ import java.util.concurrent.CountDownLatch;
 public final class McpHttpServerMain {
 
     private static final Set<String> DEFAULT_API_KEY_SCOPES = Collections.unmodifiableSet(
-            new LinkedHashSet<>(Arrays.asList("mcp:invoke", "artifacts:read", "generation:create",
+            new LinkedHashSet<>(Arrays.asList("mcp:invoke", "artifacts:read", "source-docx:upload", "generation:create",
                     "generation:read", "generation:cancel")));
 
     private McpHttpServerMain() {

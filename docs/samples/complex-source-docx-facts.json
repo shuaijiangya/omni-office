@@ -1,0 +1,59 @@
+{
+  "document": {
+    "owner": "王工",
+    "reviewer": "赵工",
+    "implementationDate": "2026-11-20"
+  },
+  "scope": {
+    "goal": "在保持支付平台独立的前提下，提供可追踪的订单创建、查询和取消能力。",
+    "excluded": "不处理支付扣款、退款和物流履约。",
+    "releaseWindow": "2026-11-20 22:00 至 23:00"
+  },
+  "architecture": {
+    "topology": "API 网关和订单服务分别部署在两个可用区；订单数据库采用主从架构，库存适配器通过内部网络调用库存服务。",
+    "isolation": "库存调用设置独立线程池和 800 毫秒超时；连续失败时熔断，订单请求返回可重试错误，不写入未预留库存的订单。",
+    "components": [
+      {"name": "API 网关", "deployment": "双可用区各 2 实例", "owner": "平台组"},
+      {"name": "订单服务", "responsibility": "创建、查询、取消订单并维护状态", "deployment": "双可用区各 3 实例", "owner": "李工"},
+      {"name": "库存适配器", "responsibility": "封装库存预留和释放调用", "deployment": "与订单服务同进程", "owner": "陈工"},
+      {"name": "订单数据库", "deployment": "主库 1 实例、只读副本 1 实例", "owner": "数据平台"}
+    ]
+  },
+  "apis": {
+    "rows": [
+      {"path": "/orders", "method": "POST", "purpose": "创建订单并预留库存", "timeoutMs": "1500"},
+      {"path": "/orders/{id}", "method": "GET", "purpose": "查询订单详情", "timeoutMs": "500"},
+      {"path": "/orders/{id}/cancel", "method": "POST", "purpose": "取消订单并释放库存", "timeoutMs": "1200"},
+      {"path": "/orders", "method": "GET", "purpose": "按客户分页查询订单", "timeoutMs": "700"}
+    ],
+    "idempotency": "创建与取消接口使用 Idempotency-Key；相同客户和键在 24 小时内返回同一业务结果。"
+  },
+  "dataModel": {
+    "fields": {
+      "orderId": "全局唯一订单编号",
+      "customerId": "下单客户编号",
+      "amount": "订单应付金额，保留两位小数",
+      "currency": "ISO 4217 三位币种代码",
+      "status": "订单状态，取值为 CREATED、CANCELLED 或 COMPLETED"
+    },
+    "statusFlow": "创建成功进入 CREATED；取消成功进入 CANCELLED；履约确认后进入 COMPLETED。CANCELLED 和 COMPLETED 均为终态。"
+  },
+  "risks": [
+    {"name": "库存超卖", "impact": "可能产生无法履约的订单", "mitigation": "库存预留成功后才提交订单；失败时返回明确错误并记录补偿任务。"},
+    {"name": "重试产生重复订单", "impact": "客户可能收到多笔相同订单", "mitigation": "使用客户编号和 Idempotency-Key 建立唯一约束，并复用首次处理结果。"},
+    {"name": "数据库不可用", "impact": "创建和取消请求失败，查询可能降级", "mitigation": "写入请求快速失败并告警；只读查询在副本可用时继续服务。"}
+  ],
+  "reviewConclusion": "有条件通过",
+  "quality": [
+    {"metric": "创建接口 P95", "target": "小于 800 毫秒", "verification": "稳定负载 200 请求每秒，连续压测 30 分钟。"},
+    {"metric": "服务可用性", "target": "月度不低于 99.9%", "verification": "按外部成功请求占比统计，剔除调用方 4xx 错误。"},
+    {"metric": "重复请求幂等", "target": "同一键只创建 1 笔订单", "verification": "并发发送 100 次相同请求，核对订单表和响应。"},
+    {"metric": "恢复点目标 RPO", "target": "不超过 5 分钟", "verification": "执行主库故障演练并核对恢复后订单记录。"}
+  ],
+  "rollout": {
+    "steps": "先部署数据库变更，再灰度发布订单服务至 10% 流量；核对错误率与延迟后逐步升至 100%。",
+    "rollbackTrigger": "连续 5 分钟创建失败率超过 2%，或 P95 延迟超过 1200 毫秒。",
+    "rollbackAction": "停止灰度扩量，切回上一稳定版本；保留已创建订单并执行数据一致性核对。",
+    "implementationDate": "2026-11-20"
+  }
+}
