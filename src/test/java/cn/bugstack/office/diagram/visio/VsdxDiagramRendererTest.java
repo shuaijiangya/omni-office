@@ -162,9 +162,51 @@ class VsdxDiagramRendererTest {
             assertTrue(loaded.getPages().getPage(0).getShapes().getCount() >= 12);
             assertTrue(hasSmallFourCenteredText(loaded));
             assertTrue(hasZeroMarginMiddleAlignedText(loaded));
+            assertEquals(2, countShapesWithFill(loaded, "#F2F2F2"));
+            assertTrue(hasTextWithFill(loaded, "RiskService", "#FFFFFF"));
+            assertTrue(hasTextWithFill(loaded, "RiskRepository", "#FFFFFF"));
         } finally {
             loaded.dispose();
         }
+    }
+
+    /**
+     * 统计采用指定不透明填充色的 Visio 形状。
+     *
+     * @param diagram 待检查的图
+     * @param color 十六进制 RGB 颜色
+     * @return 匹配的形状数量
+     */
+    private int countShapesWithFill(Diagram diagram, String color) {
+        int count = 0;
+        for (int index = 0; index < diagram.getPages().getPage(0).getShapes().getCount(); index++) {
+            Shape shape = diagram.getPages().getPage(0).getShapes().get(index);
+            if (color.equalsIgnoreCase(shape.getFill().getFillForegnd().getValue())
+                    && shape.getFill().getFillForegndTrans().getValue() == 0D) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 判断指定文字的形状是否使用给定的不透明背景色。
+     *
+     * @param diagram 待检查的图
+     * @param label 形状文字
+     * @param color 十六进制 RGB 颜色
+     * @return 找到匹配形状时返回 {@code true}
+     */
+    private boolean hasTextWithFill(Diagram diagram, String label, String color) {
+        for (int index = 0; index < diagram.getPages().getPage(0).getShapes().getCount(); index++) {
+            Shape shape = diagram.getPages().getPage(0).getShapes().get(index);
+            if (label.equals(shape.getPureText())
+                    && color.equalsIgnoreCase(shape.getFill().getFillForegnd().getValue())
+                    && shape.getFill().getFillForegndTrans().getValue() == 0D) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

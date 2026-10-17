@@ -94,6 +94,10 @@ public final class VsdxDiagramRenderer implements VisioDiagramRenderer {
     private static final int CLASS_MEMBER_HEIGHT = 24;
     /** UML 类图类卡片允许使用的最小宽度，单位为图布局 point。 */
     private static final int CLASS_MIN_WIDTH = 180;
+    /** 与 CSCI 详细设计模板一致的 UML 类卡片成员区底色。 */
+    private static final String CLASS_MEMBER_FILL = "#F2F2F2";
+    /** 与 CSCI 详细设计模板一致的 UML 类卡片标题区底色。 */
+    private static final String CLASS_HEADER_FILL = "#FFFFFF";
     /** CSCI 部件标题区域高度，单位为图布局 point。 */
     private static final int COMPONENT_HEADER_HEIGHT = 34;
     /** CSCI 部件详情每行占用高度，单位为图布局 point。 */
@@ -1017,16 +1021,33 @@ public final class VsdxDiagramRenderer implements VisioDiagramRenderer {
      * @throws Exception 当创建 Visio Shape 失败时抛出
      */
     private void drawClass(Page page, DiagramNode node, NodeBox box, Canvas canvas) throws Exception {
-        drawRectangle(page, box, canvas);
+        Shape card = drawRectangle(page, box, canvas);
+        setSolidFill(card, CLASS_MEMBER_FILL);
         int headerBottom = box.top() + CLASS_HEADER_HEIGHT;
         int attributeRows = Math.max(1, node.getClassAttributes().size());
         int attributeBottom = headerBottom + attributeRows * CLASS_MEMBER_HEIGHT;
         page.drawLine(toInch(box.left()), toY(headerBottom, canvas), toInch(box.right()), toY(headerBottom, canvas));
         page.drawLine(toInch(box.left()), toY(attributeBottom, canvas), toInch(box.right()),
                 toY(attributeBottom, canvas));
-        addText(page, box.centerX(), box.top() + 8, box.width - 20, 20, node.getLabel(), canvas);
+        Shape header = addText(page, box.centerX(), box.top() + 1, box.width - 2,
+                CLASS_HEADER_HEIGHT - 2, node.getLabel(), canvas);
+        setSolidFill(header, CLASS_HEADER_FILL);
         drawClassMembers(page, node.getClassAttributes(), box, headerBottom, canvas);
         drawClassMembers(page, node.getClassMethods(), box, attributeBottom, canvas);
+    }
+
+    /**
+     * 为可编辑 Visio 形状设置不透明的纯色填充。
+     *
+     * @param shape 待设置的形状
+     * @param color 十六进制 RGB 颜色
+     */
+    private void setSolidFill(Shape shape, String color) {
+        shape.getFill().setFillForegnd(new ColorValue(color, 0));
+        shape.getFill().setFillBkgnd(new ColorValue(color, 0));
+        shape.getFill().setFillForegndTrans(new DoubleValue(0D, 0));
+        shape.getFill().setFillBkgndTrans(new DoubleValue(0D, 0));
+        shape.getFill().setFillPattern(new IntValue(SOLID_FILL_PATTERN, 0));
     }
 
     /**

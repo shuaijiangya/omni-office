@@ -14,6 +14,9 @@ DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 
 >
 > 上传已有 Word 后由 AI 和 Function Calling 精准补充表格，请查看
 > **[上传 DOCX 的 AI 识别与精准补全](docs/source-docx-ai-completion.md)**（含[复杂文档完整补全示例](docs/complex-source-docx-sample.md)、[功能验证](docs/source-docx-completion-verification.md)与[本地 Ollama 多样本实测](docs/source-docx-ollama-live-verification.md)）。
+>
+> 按原始 CSCI 详细设计模板、Java 源码 ZIP 和可选 DDL 生成完整文档，请查看
+> **[CSCI 源码驱动详细设计](docs/csci-source-driven-design.md)**。
 
 ## 核心特性
 
