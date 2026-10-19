@@ -56,8 +56,13 @@ public final class CsciDdlParser {
                 if (declaration.isEmpty()) continue;
                 String upper = declaration.toUpperCase(Locale.ROOT);
                 if (upper.startsWith("PRIMARY KEY") || upper.startsWith("CONSTRAINT ")
-                        || upper.startsWith("UNIQUE ") || upper.startsWith("FOREIGN KEY")
-                        || upper.startsWith("CHECK ")) {
+                        || upper.startsWith("UNIQUE ") || upper.startsWith("UNIQUE(")
+                        || upper.startsWith("FOREIGN KEY")
+                        || upper.startsWith("CHECK ") || upper.startsWith("INDEX ")
+                        || upper.startsWith("KEY ") || upper.startsWith("FULLTEXT ")
+                        || upper.startsWith("SPATIAL ")
+                        || upper.startsWith("CLUSTER PRIMARY KEY")
+                        || upper.startsWith("NOT CLUSTER PRIMARY KEY")) {
                     constraints.add(declaration);
                     continue;
                 }

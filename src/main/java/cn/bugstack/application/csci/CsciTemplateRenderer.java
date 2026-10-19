@@ -279,12 +279,14 @@ public final class CsciTemplateRenderer {
             List<String[]> operations = new ArrayList<>();
             int sequence = 0;
             for (CsciDesign.Method method : clazz.methods) {
+                if ("private".equals(method.visibility)) continue;
                 operations.add(new String[]{String.valueOf(++sequence), method.visibility,
                         method.name, nonEmpty(method.description)});
             }
             body.appendChild(table(template.tables[3], operations, 1));
 
             for (CsciDesign.Method method : clazz.methods) {
+                if ("private".equals(method.visibility)) continue;
                 methodDesign(method, diagramDirectory, featureIndex);
             }
         }
@@ -299,6 +301,7 @@ public final class CsciTemplateRenderer {
          */
         private void methodDesign(CsciDesign.Method method, Path diagramDirectory,
                                   int featureIndex) throws Exception {
+            CsciNameBasedDraftEnricher.ensureFlowSteps(method);
             heading(8, method.name);
             heading(9, "函数描述");
             normal(method.description);
@@ -312,7 +315,8 @@ public final class CsciTemplateRenderer {
             }
             body.appendChild(table(template.tables[4], parameters, 1));
             heading(9, "返回值说明");
-            normal(method.returnType + "：" + nonEmpty(method.returnDescription));
+            normal(method.returnType + "：" + ("void".equals(method.returnType)
+                    ? "无返回值" : nonEmpty(method.returnDescription)));
             heading(9, "算法/逻辑");
             if (method.flowSteps.isEmpty()) normal(method.algorithm);
             else normalBeforeFigure(method.algorithm);

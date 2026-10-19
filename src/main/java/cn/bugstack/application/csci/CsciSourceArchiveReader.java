@@ -56,7 +56,7 @@ public final class CsciSourceArchiveReader {
     /** 单个类或数据库表允许的最大成员数。 */
     private static final int MAX_MEMBERS_PER_CLASS = 200;
     /** ZIP 中允许的最大数据库表数。 */
-    private static final int MAX_TABLES = 100;
+    private static final int MAX_TABLES = 200;
 
     /**
      * 解析上传 ZIP。
@@ -387,6 +387,7 @@ public final class CsciSourceArchiveReader {
                 if ("接口".equals(clazz.kind) && "package".equals(method.visibility)) {
                     method.visibility = "public";
                 }
+                if ("private".equals(method.visibility)) continue;
                 String methodDoc = docBefore(source, positions.getStartPosition(unit, member));
                 method.description = firstDescription(methodDoc);
                 method.returnDescription = tag(methodDoc, "return");
@@ -440,12 +441,95 @@ public final class CsciSourceArchiveReader {
         while (end > 0 && Character.isWhitespace(source.charAt(end - 1))) {
             end--;
         }
-        if (end < 2 || !source.substring(0, end).endsWith("*/")) {
+        int begin = source.lastIndexOf("/**", end - 1);
+        if (begin < 0) return "";
+        int commentEnd = source.indexOf("*/", begin + 3);
+        if (commentEnd < 0 || commentEnd >= end
+                || !onlyDecorators(source.substring(commentEnd + 2, end))) {
             return "";
         }
-        int begin = source.lastIndexOf("/**", end - 2);
-        return begin < 0 ? "" : source.substring(begin + 3, end - 2)
-                .replaceAll("(?m)^\\s*\\* ?", "").trim();
+        return decodeJavaUnicodeEscapes(source.substring(begin + 3, commentEnd)
+                .replaceAll("(?m)^\\s*\\* ?", "").trim());
+    }
+
+    /**
+     * 将 Javadoc 原文中的 Java Unicode 转义恢复为可阅读字符。
+     *
+     * <p>一些源码用 {@code \\uXXXX} 保存中文注释；AST 位置仍指向原始文本，
+     * 因此读取注释时需要单独解码。双反斜杠开头的字面量保持原样。</p>
+     *
+     * @param value 从源文件截取的 Javadoc 正文
+     * @return 解码后的文字
+     */
+    private static String decodeJavaUnicodeEscapes(String value) {
+        StringBuilder decoded = new StringBuilder(value.length());
+        for (int index = 0; index < value.length(); index++) {
+            if (value.charAt(index) == '\\' && (index == 0 || value.charAt(index - 1) != '\\')) {
+                int hexStart = index + 1;
+                while (hexStart < value.length() && value.charAt(hexStart) == 'u') hexStart++;
+                if (hexStart > index + 1 && hexStart + 4 <= value.length()) {
+                    String digits = value.substring(hexStart, hexStart + 4);
+                    if (digits.chars().allMatch(digit -> Character.digit(digit, 16) >= 0)) {
+                        decoded.append((char) Integer.parseInt(digits, 16));
+                        index = hexStart + 3;
+                        continue;
+                    }
+                }
+            }
+            decoded.append(value.charAt(index));
+        }
+        return decoded.toString();
+    }
+
+    /**
+     * 判断 Javadoc 与声明之间是否只有注解、空白或普通注释。
+     *
+     * @param gap Javadoc 结束到声明开始之间的源码
+     * @return 不存在其他 Java 声明时为 true
+     */
+    private static boolean onlyDecorators(String gap) {
+        int index = 0;
+        while (index < gap.length()) {
+            char current = gap.charAt(index);
+            if (Character.isWhitespace(current)) {
+                index++;
+            } else if (gap.startsWith("//", index)) {
+                int newline = gap.indexOf('\n', index + 2);
+                index = newline < 0 ? gap.length() : newline + 1;
+            } else if (gap.startsWith("/*", index)) {
+                int close = gap.indexOf("*/", index + 2);
+                if (close < 0) return false;
+                index = close + 2;
+            } else if (current == '@') {
+                index++;
+                int nameStart = index;
+                while (index < gap.length() && (Character.isJavaIdentifierPart(gap.charAt(index))
+                        || gap.charAt(index) == '.')) index++;
+                if (index == nameStart) return false;
+                while (index < gap.length() && Character.isWhitespace(gap.charAt(index))) index++;
+                if (index < gap.length() && gap.charAt(index) == '(') {
+                    int depth = 0;
+                    char quote = 0;
+                    do {
+                        char c = gap.charAt(index++);
+                        if (quote != 0) {
+                            if (c == '\\' && index < gap.length()) index++;
+                            else if (c == quote) quote = 0;
+                        } else if (c == '"' || c == '\'') {
+                            quote = c;
+                        } else if (c == '(') {
+                            depth++;
+                        } else if (c == ')') {
+                            depth--;
+                        }
+                    } while (depth > 0 && index < gap.length());
+                    if (depth != 0) return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

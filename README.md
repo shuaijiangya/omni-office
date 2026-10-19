@@ -1160,6 +1160,32 @@ Windows 请把 classpath 中的 `:` 替换为 `;`。
 | `SvgDiagramExample` | 用例图、流程图和 ER 图 SVG 文件 |
 | `OllamaAiDocumentExample` | 本地模型填充模板数据并输出 DOCX/HTML；按前文完整依赖 classpath 运行 |
 
+### 按功能目录批量生成两张 Visio 图
+
+`ReferenceDiagramZipGenerator.generate(zipPath, outputRoot)` 接收一个 ZIP，内部每个功能放一份 JSON：
+
+```text
+功能图输入.zip
+├── 任务管理模块/功能3/diagram.json
+└── 库管理模块/功能4/config.json
+```
+
+JSON 只填写功能名和 3～4 个数据名，`function` 必须与所在功能目录同名：
+
+```json
+{"function":"功能3","inputs":["数据1","数据2","数据3","数据4"]}
+```
+
+```java
+List<VisioDiagramArtifact> diagrams = new ReferenceDiagramZipGenerator()
+        .generate(Path.of("功能图输入.zip"), Path.of("生成结果"));
+```
+
+每个功能在 `生成结果/功能模块/功能/visio/` 下得到“数据流图”和“库管理流程图”各一份
+可编辑 VSDX 及对应 PNG 预览。调用前需导入 `ReferenceDiagramZipGenerator`、`VisioDiagramArtifact`、
+`Path` 和 `List`。可运行 `ReferenceDiagramZipGeneratorTest` 查看双功能 ZIP 示例；测试产物位于
+`target/reference-diagram-zip-example/`。
+
 ## 自定义报告模块
 
 新增业务模块通常需要四步：

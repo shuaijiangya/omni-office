@@ -100,6 +100,155 @@ class CsciDetailedDesignIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> new CsciSourceArchiveReader().read(zip));
     }
 
+    /** 验证源码注释中的 Unicode 转义在文档数据中恢复为中文。 */
+    @Test
+    void decodesUnicodeEscapesInJavadoc() throws Exception {
+        Path archive = temp.resolve("unicode-javadoc.zip");
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(archive))) {
+            add(output, "CSCI详细设计/测试软件/任务模块/查询任务/TaskReader.java",
+                    "/** \\u4efb\\u52a1\\u67e5\\u8be2。 */ public class TaskReader {"
+                            + "/** \\u8fd4\\u56de\\u4efb\\u52a1。 @return \\u4efb\\u52a1\\u7f16\\u53f7 */"
+                            + " public long find() { return 1; } }");
+        }
+        CsciDesign.JavaClass clazz = new CsciSourceArchiveReader().read(archive)
+                .modules.get(0).features.get(0).classes.get(0);
+        assertEquals("任务查询。", clazz.description);
+        assertEquals("返回任务。", clazz.methods.get(0).description);
+        assertEquals("任务编号", clazz.methods.get(0).returnDescription);
+    }
+
+    /**
+     * 验证单个软件可载入大型数据库设计，同时保留物理表数量上限。
+     *
+     * @throws Exception 测试 ZIP 创建或解析失败时抛出
+     */
+    @Test
+    void acceptsOneHundredFortyFiveTablesAndRejectsMoreThanTwoHundred() throws Exception {
+        Path accepted = temp.resolve("145-tables.zip");
+        writeTableArchive(accepted, 145);
+        assertEquals(145, new CsciSourceArchiveReader().read(accepted).databaseTables.size());
+        Path rejected = temp.resolve("201-tables.zip");
+        writeTableArchive(rejected, 201);
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new CsciSourceArchiveReader().read(rejected));
+        assertTrue(error.getMessage().contains("物理表数量超过 200"));
+    }
+
+    /** 验证 MySQL 普通索引不会被误识别为数据字段。 */
+    @Test
+    void doesNotTreatMysqlIndexesAsColumns() {
+        String ddl = "CREATE TABLE sample (id BIGINT COMMENT '编号', "
+                + "INDEX idx_id (id), KEY key_id (id), FULLTEXT INDEX ft_id (id));";
+        CsciDesign.DbTable table = new CsciDdlParser().parse(ddl).get(0);
+        assertEquals(1, table.columns.size());
+        assertEquals("id", table.columns.get(0).name);
+    }
+
+    /** 验证模式限定表名与达梦聚簇主键不会被误识别成字段。 */
+    @Test
+    void readsSchemaQualifiedDamengTables() {
+        String ddl = "CREATE TABLE \"FLOWCHART_BKY\".\"SAMPLE\" ("
+                + "\"ID\" VARCHAR(50) NOT NULL, \"NAME\" VARCHAR(50), "
+                + "NOT CLUSTER PRIMARY KEY(\"ID\")) STORAGE(ON \"MAIN\", CLUSTERBTR);"
+                + "COMMENT ON TABLE \"FLOWCHART_BKY\".\"SAMPLE\" IS '样本表';"
+                + "COMMENT ON COLUMN \"FLOWCHART_BKY\".\"SAMPLE\".\"NAME\" IS '名称';";
+        CsciDesign.DbTable table = new CsciDdlParser().parse(ddl).get(0);
+        assertEquals("FLOWCHART_BKY.SAMPLE", table.physicalName);
+        assertEquals("样本表", table.logicalName);
+        assertEquals(2, table.columns.size());
+        assertTrue(table.columns.get(0).constraint.contains("PRIMARY KEY"));
+        assertEquals("名称", table.columns.get(1).comment);
+    }
+
+    /** 验证名称草稿不覆盖已确认说明，并为每个非 private 方法绘制流程。 */
+    @Test
+    void nameBasedDraftsAreExplicitAndBounded() {
+        CsciDesign design = new CsciDesign();
+        design.software = "评估软件";
+        CsciDesign.Module module = new CsciDesign.Module();
+        module.name = "计算模块";
+        design.modules.add(module);
+        CsciDesign.Feature feature = new CsciDesign.Feature();
+        feature.name = "指标计算";
+        module.features.add(feature);
+        CsciDesign.JavaClass clazz = new CsciDesign.JavaClass();
+        clazz.name = "Calculator";
+        feature.classes.add(clazz);
+        for (int index = 0; index < 5; index++) {
+            CsciDesign.Method method = new CsciDesign.Method();
+            method.name = "calculateScore" + index;
+            method.visibility = "public";
+            method.returnType = "double";
+            method.sourceBody = "{ if (input != null) { for (int i = 0; i < values.size(); i++) "
+                    + "{ result += values.get(i); } return result; } return 0; }";
+            if (index == 0) method.algorithm = "经确认的算法规则。";
+            clazz.methods.add(method);
+        }
+        CsciDesign.Method hidden = new CsciDesign.Method();
+        hidden.name = "calculateInternal";
+        hidden.visibility = "private";
+        hidden.returnType = "double";
+        hidden.sourceBody = "{ return 1; }";
+        clazz.methods.add(hidden);
+        new CsciNameBasedDraftEnricher().enrich(design);
+        assertEquals("经确认的算法规则。", clazz.methods.get(0).algorithm);
+        assertTrue(clazz.methods.get(1).algorithm.startsWith("设计草稿"));
+        assertTrue(clazz.methods.get(1).caution.startsWith("设计草稿"));
+        assertEquals(5, clazz.methods.stream().filter(method -> !method.flowSteps.isEmpty()).count());
+        assertTrue(hidden.flowSteps.isEmpty());
+        assertTrue(clazz.methods.stream().flatMap(method -> method.flowSteps.stream())
+                .anyMatch(step -> step.equals("计算评估结果")));
+    }
+
+    /** 验证超大类图仅摘要展示成员，避免 Word 中的预览图过长。 */
+    @Test
+    void summarizesOversizedClassDiagramNodes() {
+        CsciDesign.JavaClass clazz = new CsciDesign.JavaClass();
+        clazz.name = "LargeService";
+        for (int index = 0; index < 20; index++) {
+            CsciDesign.Field field = new CsciDesign.Field();
+            field.name = "field" + index;
+            field.type = "String";
+            field.visibility = "private";
+            clazz.fields.add(field);
+            CsciDesign.Method method = new CsciDesign.Method();
+            method.name = "operation" + index;
+            method.returnType = "String";
+            method.visibility = "public";
+            clazz.methods.add(method);
+        }
+        CsciDesign.Method hidden = new CsciDesign.Method();
+        hidden.name = "internalOnly";
+        hidden.returnType = "void";
+        hidden.visibility = "private";
+        clazz.methods.add(hidden);
+        var node = CsciClassDiagramFactory.create("大类", List.of(clazz)).getNodes().get(0);
+        assertEquals(15, node.getClassAttributes().size());
+        assertEquals(15, node.getClassMethods().size());
+        assertTrue(node.getClassAttributes().get(14).contains("其余 6 个字段见正文"));
+        assertTrue(node.getClassMethods().get(14).contains("其余 6 个方法见正文"));
+        assertTrue(node.getClassMethods().stream().noneMatch(method -> method.contains("internalOnly")));
+    }
+
+    /**
+     * 为数据库表容量边界构造最小的合法源码 ZIP。
+     *
+     * @param archive 输出 ZIP 路径
+     * @param tableCount 要生成的物理表数量
+     * @throws Exception ZIP 写入失败时抛出
+     */
+    private static void writeTableArchive(Path archive, int tableCount) throws Exception {
+        StringBuilder ddl = new StringBuilder();
+        for (int index = 0; index < tableCount; index++) {
+            ddl.append("CREATE TABLE sample_").append(index).append(" (id BIGINT PRIMARY KEY);\n");
+        }
+        try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(archive))) {
+            add(output, "CSCI详细设计/测试软件/测试模块/测试功能/Sample.java",
+                    "/** 样例类。 */ public class Sample { }");
+            add(output, "数据库设计/逻辑结构设计/测试软件数据库设计/sample.sql", ddl.toString());
+        }
+    }
+
     /**
      * 验证 AI 仅补全缺失说明，且不覆盖源码中的显式说明。
      *
@@ -111,6 +260,7 @@ class CsciDetailedDesignIntegrationTest {
         CsciDesign.JavaClass reader = design.modules.stream().flatMap(m -> m.features.stream())
                 .flatMap(f -> f.classes.stream()).filter(c -> c.name.equals("TaskReader"))
                 .findFirst().orElseThrow();
+        assertEquals(2, reader.methods.size(), "private 方法不进入设计数据");
         CsciDesign.Method exists = reader.methods.get(1);
         List<String> bodies = new ArrayList<>();
         new CsciMethodDesignEnricher(request -> {
@@ -173,9 +323,10 @@ class CsciDetailedDesignIntegrationTest {
         assertTrue(headings.contains("Heading 4:试验方案表/test_plan"));
         assertTrue(captions.stream().anyMatch(s -> s.startsWith("表 1-1")));
         assertTrue(captions.stream().anyMatch(s -> s.startsWith("表 2-1")));
-        assertEquals(21, captions.size());
+        assertEquals(24, captions.size());
         assertTrue(doc.getText().contains("long：任务编号"));
         assertFalse(doc.getText().contains("long：待补充"));
+        assertFalse(doc.getText().contains("void：待补充"));
         assertFalse(doc.getText().contains("basic_action"));
         assertFalse(doc.getText().contains("（补充：每个功能类设计）"));
         assertFalse(doc.getText().contains("表 7-1"));
@@ -194,7 +345,8 @@ class CsciDetailedDesignIntegrationTest {
         for (Object node : doc.getChildNodes(NodeType.SHAPE, true)) {
             if (((Shape) node).getOleFormat() != null) oleCount++;
         }
-        assertEquals(3, oleCount);
+        assertEquals(6, oleCount);
+        assertFalse(doc.getText().contains("internalTaskId"));
         Path queryDiagram = output.toAbsolutePath().getParent()
                 .resolve("csci-diagrams/feature-001-class-01.vsdx");
         assertTrue(Files.isRegularFile(queryDiagram));
@@ -253,6 +405,7 @@ class CsciDetailedDesignIntegrationTest {
                             + "  /** 判断任务是否存在。 @return 任务是否存在\n"
                             + "   * @csci.caution taskId 为负时返回 false；调用方应区分无效编号与不存在的任务。 */\n"
                             + "  public boolean exists() { if (taskId < 0) return false; return repository.findById(taskId) != null; }\n"
+                            + "  /** 内部编号。 */ private long internalTaskId() { return taskId; }\n"
                             + "}\n");
             add(output, "CSCI详细设计/智能体训练软件/任务管理模块/查询任务/TaskRepository.java",
                     "/** 任务仓储接口。 */ public interface TaskRepository {\n"

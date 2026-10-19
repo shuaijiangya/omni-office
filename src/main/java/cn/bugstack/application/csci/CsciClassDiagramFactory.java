@@ -7,10 +7,18 @@ import cn.bugstack.office.diagram.model.DiagramType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Comparator;
 import java.util.regex.Pattern;
 
 /** 将同一功能下多个 Java 类及其类型引用转换为类图语义。 */
 final class CsciClassDiagramFactory {
+
+    /** Visio 节点最多显示的字段数；全部字段仍保留在 Word 数据元素表。 */
+    private static final int MAX_VISIBLE_FIELDS = 14;
+    /** Visio 节点最多显示的方法数；全部方法仍保留在 Word 类操作表。 */
+    private static final int MAX_VISIBLE_METHODS = 14;
+    /** Visio 节点单个成员标签的最长字符数。 */
+    private static final int MAX_LABEL_LENGTH = 56;
 
     /** 工具类不允许实例化。 */
     private CsciClassDiagramFactory() {
@@ -28,16 +36,28 @@ final class CsciClassDiagramFactory {
         for (CsciDesign.JavaClass clazz : classes) {
             List<String> fields = new ArrayList<>();
             List<String> methods = new ArrayList<>();
-            clazz.fields.forEach(f -> fields.add(symbol(f.visibility) + " " + f.name + ": " + f.type));
-            clazz.methods.forEach(m -> methods.add(symbol(m.visibility) + " " + m.name
-                    + "(): " + m.returnType));
+            clazz.fields.stream().limit(MAX_VISIBLE_FIELDS).forEach(f -> fields.add(
+                    compact(symbol(f.visibility) + " " + f.name + ": " + f.type)));
+            if (clazz.fields.size() > MAX_VISIBLE_FIELDS) {
+                fields.add("其余 " + (clazz.fields.size() - MAX_VISIBLE_FIELDS) + " 个字段见正文");
+            }
+            List<CsciDesign.Method> visibleMethods = clazz.methods.stream()
+                    .filter(m -> !"private".equals(m.visibility))
+                    .sorted(Comparator.comparingInt(m -> visibilityPriority(m.visibility)))
+                    .collect(java.util.stream.Collectors.toList());
+            visibleMethods.stream()
+                    .limit(MAX_VISIBLE_METHODS).forEach(m -> methods.add(
+                            compact(symbol(m.visibility) + " " + m.name + "(): " + m.returnType)));
+            if (visibleMethods.size() > MAX_VISIBLE_METHODS) {
+                methods.add("其余 " + (visibleMethods.size() - MAX_VISIBLE_METHODS) + " 个方法见正文");
+            }
             builder.node(DiagramNode.classNode(clazz.name, clazz.name, fields, methods));
         }
         for (CsciDesign.JavaClass source : classes) {
             for (CsciDesign.JavaClass target : classes) {
                 if (source == target) continue;
                 boolean fieldReference = source.fields.stream().anyMatch(f -> references(f.type, target.name));
-                boolean methodReference = source.methods.stream().anyMatch(m ->
+                boolean methodReference = source.methods.stream().filter(m -> !"private".equals(m.visibility)).anyMatch(m ->
                         references(m.returnType, target.name)
                                 || m.parameters.stream().anyMatch(p -> references(p.type, target.name)));
                 if (fieldReference || methodReference) {
@@ -71,5 +91,29 @@ final class CsciClassDiagramFactory {
         if ("protected".equals(visibility)) return "#";
         if ("private".equals(visibility)) return "-";
         return "~";
+    }
+
+    /**
+     * 对类图中的方法按可见性排序，使对外接口优先展示。
+     *
+     * @param visibility Java 访问级别
+     * @return 越小越优先的排序值
+     */
+    private static int visibilityPriority(String visibility) {
+        if ("public".equals(visibility)) return 0;
+        if ("protected".equals(visibility)) return 1;
+        if ("package".equals(visibility)) return 2;
+        return 3;
+    }
+
+    /**
+     * 缩短过长的成员标签，完整声明仍在 Word 表格中。
+     *
+     * @param label 原始 UML 成员标签
+     * @return 适合 Visio 节点宽度的标签
+     */
+    private static String compact(String label) {
+        return label.length() <= MAX_LABEL_LENGTH ? label
+                : label.substring(0, MAX_LABEL_LENGTH - 1) + "…";
     }
 }

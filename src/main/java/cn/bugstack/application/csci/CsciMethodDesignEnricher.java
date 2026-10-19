@@ -48,6 +48,7 @@ public final class CsciMethodDesignEnricher {
             for (CsciDesign.Feature feature : module.features) {
                 for (CsciDesign.JavaClass clazz : feature.classes) {
                     for (CsciDesign.Method method : clazz.methods) {
+                        if ("private".equals(method.visibility)) continue;
                         enrichMethod(design.software, module.name, feature.name, clazz, method);
                     }
                 }

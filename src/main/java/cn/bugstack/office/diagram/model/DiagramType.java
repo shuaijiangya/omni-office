@@ -24,5 +24,8 @@ public enum DiagramType {
     COMPONENT,
 
     /** 系统总体功能逻辑分解图。 */
-    OVERALL_FUNCTION_LOGIC
+    OVERALL_FUNCTION_LOGIC,
+
+    /** 参考文档样式的数据流图。 */
+    DATA_FLOW
 }

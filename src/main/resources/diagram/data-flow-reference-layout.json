@@ -1,0 +1,26 @@
+{
+  "width": 1500,
+  "height": 800,
+  "background": "#FFFFFF",
+  "stroke": "#000000",
+  "strokeWidth": 3,
+  "fontFamily": "黑体",
+  "fontSize": 12,
+  "accentTop": "#8B2727",
+  "accentBottom": "#F2F2F2",
+  "caption": "图 5-3 功能1数据流图",
+  "captionCenter": [750, 744],
+  "nodes": [
+    {"id": "data1", "kind": "DOCUMENT", "label": "数据1", "x": 100, "y": 40, "width": 265, "height": 116},
+    {"id": "data2", "kind": "DOCUMENT", "label": "数据2", "x": 110, "y": 348, "width": 260, "height": 114},
+    {"id": "function", "kind": "PROCESS", "label": "功能1", "x": 526, "y": 210, "width": 300, "height": 80},
+    {"id": "database", "kind": "DATABASE", "label": "数据库", "x": 1205, "y": 173, "width": 270, "height": 152},
+    {"id": "control", "kind": "CONTROL_ICON", "label": "", "x": 590, "y": 450, "width": 180, "height": 174}
+  ],
+  "edges": [
+    {"from": "data1", "to": "function", "points": [[365, 97], [440, 97], [440, 250], [526, 250]]},
+    {"from": "data2", "to": "function", "points": [[370, 405], [440, 405], [440, 250]]},
+    {"from": "function", "to": "database", "label": "持久化", "labelCenter": [1015, 248], "points": [[826, 250], [1205, 250]]},
+    {"from": "function", "to": "control", "points": [[676, 290], [676, 450]]}
+  ]
+}
