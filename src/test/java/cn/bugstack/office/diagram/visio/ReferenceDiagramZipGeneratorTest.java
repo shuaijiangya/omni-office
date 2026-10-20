@@ -42,7 +42,8 @@ class ReferenceDiagramZipGeneratorTest {
         Path zip = example.resolve("功能图输入.zip");
         Map<String, String> entries = new LinkedHashMap<>();
         entries.put("任务管理模块/功能3/diagram.json",
-                "{\"function\":\"功能3\",\"inputs\":[\"数据1\",\"数据2\",\"数据3\",\"数据4\"]}");
+                "{\"function\":\"功能3\",\"inputs\":[\"数据1\",\"数据2\",\"数据3\",\"数据4\"],"
+                        + "\"persistenceLabel\":\"写入数据库\"}");
         entries.put("库管理模块/功能4/config.json",
                 "{\"function\":\"功能4\",\"inputs\":[\"条件库\",\"原子动作库\",\"感知器库\"]}");
         writeZip(zip, entries);
@@ -61,10 +62,25 @@ class ReferenceDiagramZipGeneratorTest {
                 .toString());
         try {
             boolean hasData4 = false;
+            boolean hasPersistenceLabel = false;
             for (int index = 0; index < loaded.getPages().getPage(0).getShapes().getCount(); index++) {
-                hasData4 |= "数据4".equals(loaded.getPages().getPage(0).getShapes().get(index).getPureText());
+                String text = loaded.getPages().getPage(0).getShapes().get(index).getPureText();
+                hasData4 |= "数据4".equals(text);
+                hasPersistenceLabel |= "写入数据库".equals(text);
             }
             assertTrue(hasData4);
+            assertFalse(hasPersistenceLabel);
+        } finally {
+            loaded.dispose();
+        }
+        loaded = new Diagram(output.resolve("任务管理模块/功能3/visio/功能3-数据流图.vsdx").toString());
+        try {
+            boolean hasCustomLabel = false;
+            for (int index = 0; index < loaded.getPages().getPage(0).getShapes().getCount(); index++) {
+                hasCustomLabel |= "写入数据库".equals(
+                        loaded.getPages().getPage(0).getShapes().get(index).getPureText());
+            }
+            assertTrue(hasCustomLabel);
         } finally {
             loaded.dispose();
         }

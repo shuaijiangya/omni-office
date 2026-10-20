@@ -25,7 +25,7 @@ import java.util.zip.ZipFile;
  * 批量读取 {@code 功能模块/功能/*.json} ZIP，为每个功能绘制两张固定模板的 Visio 图。
  *
  * <p>每个 JSON 使用数据流图与库管理流程图共用的简化结构：
- * {@code {"function":"功能3","inputs":["数据1","数据2","数据3"]}}。
+ * {@code {"function":"功能3","inputs":["数据1","数据2","数据3"],"persistenceLabel":"持久化"}}。
  * 输出保存在 {@code 输出目录/功能模块/功能/visio/}，其中每张 VSDX 都有同名 PNG 预览。
  * 输入 ZIP 仅在内存中读取；所有图绘制成功后才复制到目标目录。</p>
  */
@@ -147,10 +147,16 @@ public final class ReferenceDiagramZipGenerator {
         }
         JsonNode function = root == null ? null : root.get("function");
         JsonNode inputs = root == null ? null : root.get("inputs");
-        if (root == null || !root.isObject() || root.size() != 2 || function == null
+        if (root == null || !root.isObject()
+                || root.size() != (root.has("persistenceLabel") ? 3 : 2) || function == null
                 || !function.isTextual() || !directoryFunction.equals(function.asText().trim())
                 || inputs == null || !inputs.isArray() || inputs.size() < 3 || inputs.size() > 4) {
             throw new IllegalArgumentException("JSON 必须包含与目录同名的 function 及 3～4 个 inputs：" + sourcePath);
+        }
+        JsonNode persistenceLabel = root.get("persistenceLabel");
+        if (persistenceLabel != null && (!persistenceLabel.isTextual()
+                || persistenceLabel.asText().length() > 40)) {
+            throw new IllegalArgumentException("persistenceLabel 必须是长度不超过 40 的文本：" + sourcePath);
         }
     }
 

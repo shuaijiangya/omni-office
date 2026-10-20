@@ -18,6 +18,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -188,5 +189,49 @@ class ReferenceDataFlowRendererTest {
         Files.writeString(input, "{\"inputs\":[\"数据1\",\"数据2\"],\"function\":\"" + "超长功能名称".repeat(6) + "\"}");
         assertThrows(IllegalArgumentException.class,
                 () -> new ReferenceDataFlowRenderer().render(input, temporaryDirectory.resolve("function-too-long.vsdx")));
+    }
+
+    /**
+     * 验证持久化连线标注可由业务 JSON 替换或隐藏，省略字段仍保留默认文字。
+     *
+     * @throws Exception JSON、VSDX 或 PNG 处理失败时抛出
+     */
+    @Test
+    void customizesOrHidesPersistenceLabel() throws Exception {
+        Path input = temporaryDirectory.resolve("persistence-label.json");
+        Files.writeString(input, "{\"inputs\":[\"数据1\",\"数据2\"],\"function\":\"功能3\","
+                + "\"persistenceLabel\":\"写入数据库\"}");
+        VisioDiagramArtifact renamed = new ReferenceDataFlowRenderer()
+                .render(input, temporaryDirectory.resolve("renamed.vsdx"));
+        Diagram loaded = new Diagram(renamed.getVsdxPath().toString());
+        try {
+            Set<String> labels = new HashSet<>();
+            for (int index = 0; index < loaded.getPages().getPage(0).getShapes().getCount(); index++) {
+                labels.add(loaded.getPages().getPage(0).getShapes().get(index).getPureText());
+            }
+            assertTrue(labels.contains("写入数据库"));
+            assertFalse(labels.contains("持久化"));
+        } finally {
+            loaded.dispose();
+        }
+
+        Files.writeString(input, "{\"inputs\":[\"数据1\",\"数据2\"],\"function\":\"功能3\","
+                + "\"persistenceLabel\":\"\"}");
+        VisioDiagramArtifact hidden = new ReferenceDataFlowRenderer()
+                .render(input, temporaryDirectory.resolve("hidden.vsdx"));
+        loaded = new Diagram(hidden.getVsdxPath().toString());
+        try {
+            for (int index = 0; index < loaded.getPages().getPage(0).getShapes().getCount(); index++) {
+                assertFalse(loaded.getPages().getPage(0).getShapes().get(index).getNameU()
+                        .startsWith("FlowLabel_"));
+            }
+        } finally {
+            loaded.dispose();
+        }
+
+        Files.writeString(input, "{\"inputs\":[\"数据1\",\"数据2\"],\"function\":\"功能3\","
+                + "\"persistenceLabel\":null}");
+        assertThrows(IllegalArgumentException.class,
+                () -> new ReferenceDataFlowRenderer().render(input, temporaryDirectory.resolve("invalid-label.vsdx")));
     }
 }

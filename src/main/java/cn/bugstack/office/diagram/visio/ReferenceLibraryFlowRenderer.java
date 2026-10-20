@@ -103,9 +103,13 @@ public final class ReferenceLibraryFlowRenderer {
 
     /** 校验仅包含功能名和三至四份数据名的业务输入。 */
     private String[] inputs(JsonNode input) {
-        if (input == null || !input.isObject() || input.size() != 2
+        if (input == null || !input.isObject() || input.size() != (input.has("persistenceLabel") ? 3 : 2)
                 || !input.has("function") || !input.has("inputs")) {
-            throw new IllegalArgumentException("library-flow JSON only accepts function and inputs");
+            throw new IllegalArgumentException("library-flow JSON only accepts function, inputs and persistenceLabel");
+        }
+        if (input.has("persistenceLabel") && (!input.get("persistenceLabel").isTextual()
+                || input.get("persistenceLabel").asText().length() > 40)) {
+            throw new IllegalArgumentException("persistenceLabel must be text with at most 40 characters");
         }
         JsonNode names = input.get("inputs");
         if (names == null || !names.isArray() || names.size() < 3 || names.size() > 4) {

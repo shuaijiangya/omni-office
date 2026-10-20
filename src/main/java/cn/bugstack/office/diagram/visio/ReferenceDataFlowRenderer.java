@@ -103,16 +103,16 @@ public final class ReferenceDataFlowRenderer {
     }
 
     /**
-     * 把两到四份业务输入及功能名称填入内置布局，持久化、数据库和样式保持固定。
+     * 把两到四份业务输入、功能名称及可选的持久化标注填入内置布局。
      *
      * @param input 调用方输入配置
      * @return 已替换文档节点名称的完整布局
      * @throws IOException 内置布局资源不存在或格式错误时抛出
      */
     private JsonNode applyInputs(JsonNode input) throws IOException {
-        if (input == null || !input.isObject() || input.size() != 2
+        if (input == null || !input.isObject() || input.size() != (input.has("persistenceLabel") ? 3 : 2)
                 || !input.has("inputs") || !input.has("function")) {
-            throw new IllegalArgumentException("data-flow JSON only accepts inputs and function");
+            throw new IllegalArgumentException("data-flow JSON only accepts inputs, function and persistenceLabel");
         }
         JsonNode names = input.get("inputs");
         if (names == null || !names.isArray() || names.size() < 2 || names.size() > 4) {
@@ -126,6 +126,14 @@ public final class ReferenceDataFlowRenderer {
         String function = required(input, "function").trim();
         if (function.length() > 40) {
             throw new IllegalArgumentException("data-flow function name must contain 1-40 characters");
+        }
+        String persistenceLabel = null;
+        if (input.has("persistenceLabel")) {
+            JsonNode value = input.get("persistenceLabel");
+            if (!value.isTextual() || value.asText().length() > 40) {
+                throw new IllegalArgumentException("persistenceLabel must be text with at most 40 characters");
+            }
+            persistenceLabel = value.asText().trim();
         }
         InputStream resource = getClass().getResourceAsStream(LAYOUT_RESOURCE);
         if (resource == null) throw new IOException("missing data-flow layout resource: " + LAYOUT_RESOURCE);
@@ -149,6 +157,26 @@ public final class ReferenceDataFlowRenderer {
                         throw new IllegalArgumentException("data-flow label exceeds fixed shape width: " + label);
                     }
                     ((ObjectNode) node).put("label", label);
+                }
+                if (persistenceLabel != null) {
+                    JsonNode storageEdge = null;
+                    for (JsonNode edge : spec.get("edges")) {
+                        if ("function".equals(edge.path("from").asText())
+                                && "database".equals(edge.path("to").asText())) {
+                            storageEdge = edge;
+                            break;
+                        }
+                    }
+                    if (storageEdge == null) throw new IOException("reference data-flow layout lacks storage edge");
+                    if (persistenceLabel.isEmpty()) {
+                        ((ObjectNode) storageEdge).remove("label");
+                        ((ObjectNode) storageEdge).remove("labelCenter");
+                    } else {
+                        if (metrics.stringWidth(persistenceLabel) > 330) {
+                            throw new IllegalArgumentException("persistenceLabel exceeds storage edge width");
+                        }
+                        ((ObjectNode) storageEdge).put("label", persistenceLabel);
+                    }
                 }
                 String caption = required(spec, "caption").replace("功能1", function);
                 if (metrics.stringWidth(caption) > 650) {
@@ -374,9 +402,21 @@ public final class ReferenceDataFlowRenderer {
         }
         if (edge.has("label")) {
             JsonNode center = edge.get("labelCenter");
-            int labelWidth = required(edge, "label").length() * integer(spec, "fontSize") + 16;
+            int labelWidth = measuredTextWidth(required(edge, "label"), spec) + 16;
             text(page, center.get(0).asInt(), center.get(1).asInt() - 12, labelWidth, 24,
                     required(edge, "label"), spec, height, "FlowLabel");
+        }
+    }
+
+    /** 按模板字体计算连线标注的实际宽度，避免较长英文文字遮住图形。 */
+    private int measuredTextWidth(String value, JsonNode spec) {
+        BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            Font font = new Font(required(spec, "fontFamily"), Font.PLAIN, integer(spec, "fontSize"));
+            return graphics.getFontMetrics(font).stringWidth(value);
+        } finally {
+            graphics.dispose();
         }
     }
 
