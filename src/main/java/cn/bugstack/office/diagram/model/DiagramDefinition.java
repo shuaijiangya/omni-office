@@ -13,7 +13,7 @@ public final class DiagramDefinition {
 
     /** 图类型。 */
     private final DiagramType type;
-    /** 图标题。 */
+    /** 可选图标题元数据。 */
     private final String title;
     /** 图节点列表。 */
     private final List<DiagramNode> nodes;
@@ -36,10 +36,10 @@ public final class DiagramDefinition {
     }
 
     /**
-     * 创建指定类型和标题的图定义构建器。
+     * 创建指定类型的图定义构建器，标题为可选元数据。
      *
      * @param type 图类型
-     * @param title 图标题
+     * @param title 可选图标题元数据，Visio 不在图内绘制
      * @return 图定义构建器
      */
     public static Builder builder(DiagramType type, String title) {
@@ -56,9 +56,9 @@ public final class DiagramDefinition {
     }
 
     /**
-     * 获取图标题。
+     * 获取可选图标题元数据。
      *
-     * @return 图标题
+     * @return 图标题；未提供时为空字符串
      */
     public String getTitle() {
         return title;
@@ -98,7 +98,7 @@ public final class DiagramDefinition {
 
         /** 图类型。 */
         private final DiagramType type;
-        /** 图标题。 */
+        /** 可选图标题元数据。 */
         private final String title;
         /** 按插入顺序保存的图节点。 */
         private final Map<String, DiagramNode> nodes = new LinkedHashMap<>();
@@ -111,17 +111,14 @@ public final class DiagramDefinition {
          * 创建图语义构建器。
          *
          * @param type 图类型
-         * @param title 图标题
+         * @param title 可选图标题元数据，Visio 不在图内绘制
          */
         private Builder(DiagramType type, String title) {
             if (type == null) {
                 throw new IllegalArgumentException("diagram type must not be null");
             }
-            if (title == null || title.trim().isEmpty()) {
-                throw new IllegalArgumentException("diagram title must not be blank");
-            }
             this.type = type;
-            this.title = title.trim();
+            this.title = title == null ? "" : title.trim();
         }
 
         /**

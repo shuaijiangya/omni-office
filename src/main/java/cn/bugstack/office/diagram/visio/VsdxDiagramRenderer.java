@@ -68,11 +68,7 @@ public final class VsdxDiagramRenderer implements VisioDiagramRenderer {
     private static final int USE_CASE_ACTOR_MODULE_GAP = 68;
     /** 模块边界顶部到首个功能用例中心的纵向距离，单位为图布局 point。 */
     private static final int USE_CASE_FIRST_CENTER_OFFSET = 54;
-    /** 图标题开始区域的纵坐标，单位为图布局 point。 */
-    private static final int TITLE_TOP = 18;
-    /** 图标题区域高度，单位为图布局 point。 */
-    private static final int TITLE_HEIGHT = 24;
-    /** 图标题与第一个图元之间预留的最小纵向空间，单位为图布局 point。 */
+    /** 第一个图元的起始区域，单位为图布局 point。 */
     private static final int CONTENT_TOP = 112;
     /** 流程图相邻逻辑行的中心间距，单位为图布局 point。 */
     private static final int FLOW_ROW_GAP = 112;
@@ -214,7 +210,6 @@ public final class VsdxDiagramRenderer implements VisioDiagramRenderer {
         try {
             Page page = diagram.getPages().getPage(0);
             configurePage(page, canvas);
-            renderTitle(page, definition.getTitle(), canvas);
             switch (definition.getType()) {
                 case USE_CASE:
                     renderUseCase(page, definition, canvas);
@@ -506,8 +501,6 @@ public final class VsdxDiagramRenderer implements VisioDiagramRenderer {
             graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             graphics.setFont(new Font("Hiragino Sans GB", Font.PLAIN, 12));
-            drawCenteredPreviewText(graphics, definition.getTitle(), canvas.width / 2, TITLE_TOP + TITLE_HEIGHT,
-                    new Font("Hiragino Sans GB", Font.BOLD, 16));
             Map<String, NodeBox> boxes = flowNodeBoxes(definition, canvas);
             drawPreviewEdges(graphics, definition.getEdges(), boxes, canvas);
             for (DiagramNode node : definition.getNodes()) {
@@ -653,17 +646,6 @@ public final class VsdxDiagramRenderer implements VisioDiagramRenderer {
         graphics.setFont(font);
         FontMetrics metrics = graphics.getFontMetrics(font);
         graphics.drawString(text, centerX - metrics.stringWidth(text) / 2, baselineY);
-    }
-
-    /**
-     * 渲染图标题。
-     *
-     * @param page Visio 页面
-     * @param title 图标题
-     * @param canvas 画布参数
-     */
-    private void renderTitle(Page page, String title, Canvas canvas) throws Exception {
-        addText(page, canvas.width / 2, TITLE_TOP, canvas.width - PADDING * 2, TITLE_HEIGHT, title, canvas);
     }
 
     /**

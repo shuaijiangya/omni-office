@@ -3,18 +3,26 @@ package cn.bugstack.office.diagram.visio;
 import cn.bugstack.office.diagram.api.VisioDiagramArtifact;
 import cn.bugstack.office.diagram.model.DiagramType;
 import com.aspose.diagram.Char;
+import com.aspose.diagram.ArrowSize;
+import com.aspose.diagram.ArrowSizeValue;
 import com.aspose.diagram.ColorValue;
+import com.aspose.diagram.Connect;
+import com.aspose.diagram.Connection;
 import com.aspose.diagram.Cp;
 import com.aspose.diagram.Diagram;
 import com.aspose.diagram.DoubleValue;
 import com.aspose.diagram.HorzAlign;
 import com.aspose.diagram.HorzAlignValue;
+import com.aspose.diagram.IntValue;
+import com.aspose.diagram.LinePattern;
+import com.aspose.diagram.LineTo;
 import com.aspose.diagram.Page;
 import com.aspose.diagram.Para;
 import com.aspose.diagram.Pp;
 import com.aspose.diagram.SaveFileFormat;
 import com.aspose.diagram.Shape;
 import com.aspose.diagram.StrValue;
+import com.aspose.diagram.Text;
 import com.aspose.diagram.Txt;
 import com.aspose.diagram.VerticalAlign;
 import com.aspose.diagram.VerticalAlignValue;
@@ -34,20 +42,22 @@ import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 根据固定的“菜单栏→库管理→数据项→增删改查→结束”流程图模板生成 Visio。
  *
- * <p>仅复用业务 JSON 中的功能名及三至四份数据名；其他文字、节点、连线、白底黑线样式固定。
+ * <p>复用业务 JSON 中的功能名及任意数量的数据名；其他文字、节点、连线、白底黑线样式固定。
  * 所有图形与文字在 VSDX 中仍是可编辑对象。</p>
  */
 public final class ReferenceLibraryFlowRenderer {
 
     /** 画布宽度，单位为绘图点。 */
     private static final int WIDTH = 1200;
-    /** 画布高度，单位为绘图点。 */
-    private static final int HEIGHT = 1150;
+    /** 相邻数据节点之间的水平间距，单位为绘图点。 */
+    private static final int DATA_GAP = 110;
     /** 画布点到 Visio 英寸的换算值。 */
     private static final double POINTS_PER_INCH = 72D;
     /** 所有轮廓与连接线的统一宽度。 */
@@ -62,7 +72,7 @@ public final class ReferenceLibraryFlowRenderer {
     /**
      * 将与数据流图相同的简化 JSON 绘制为固定库管理流程图。
      *
-     * @param inputJson 包含 {@code function} 和三至四个 {@code inputs} 的 JSON 文件
+     * @param inputJson 包含 {@code function} 和至少一个 {@code inputs} 的 JSON 文件
      * @param vsdxPath Visio 输出路径
      * @return 可编辑 Visio 与预览 PNG
      * @throws Exception 输入不合法或文件无法生成时抛出
@@ -80,19 +90,51 @@ public final class ReferenceLibraryFlowRenderer {
         try {
             Page page = diagram.getPages().getPage(0);
             page.getPageSheet().getPageProps().getPageWidth().setValue(plan.width / POINTS_PER_INCH);
-            page.getPageSheet().getPageProps().getPageHeight().setValue(HEIGHT / POINTS_PER_INCH);
-            Shape background = rectangle(page, 0, 0, plan.width, HEIGHT);
-            background.getFill().setFillForegnd(new ColorValue("#FFFFFF", 0));
-            background.getLine().setLineColor(new ColorValue("#FFFFFF", 0));
-            background.setNameU("LibraryFlowBackground");
-            for (PathLine path : plan.lines) {
-                if (!path.name.startsWith("OperationDivider")) drawVisioPath(page, path);
+            page.getPageSheet().getPageProps().getPageHeight().setValue(plan.height / POINTS_PER_INCH);
+            // 页面本身就是白色；整页白色 Shape 会被 Visio/Word 当作可选择对象。
+            Map<String, Shape> nodes = new HashMap<>();
+            for (Box box : plan.boxes) {
+                if ("operations".equals(box.id)) {
+                    Shape outer = rectangle(page, box.x, box.y, box.width, box.height, plan.height);
+                    outer.getFill().setFillForegnd(new ColorValue("#FFFFFF", 0));
+                    outer.getLine().setLineColor(new ColorValue("#000000", 0));
+                    outer.getLine().setLineWeight(new DoubleValue(STROKE_WIDTH / POINTS_PER_INCH, 0));
+                    outer.setNameU("LibraryBox_operations");
+                    nodes.put(box.id, outer);
+                    for (int index = 0; index < 4; index++) {
+                        Box cell = new Box("operation" + index, box.x + index * 65,
+                                box.y, 65, box.height, false);
+                        Shape label = drawVisioBox(page, cell, plan.height,
+                                "增删改查".substring(index, index + 1));
+                        // 相邻完整矩形会把每条分隔边绘制两次；单元格仅承载可编辑文字。
+                        label.getLine().setLinePattern(new LinePattern(0));
+                        label.getFill().setFillPattern(new IntValue(0, 0));
+                    }
+                } else {
+                    nodes.put(box.id, drawVisioBox(page, box, plan.height, labelText(plan, box.id)));
+                }
             }
-            for (Box box : plan.boxes) drawVisioBox(page, box);
             for (PathLine path : plan.lines) {
-                if (path.name.startsWith("OperationDivider")) drawVisioPath(page, path);
+                Shape connector = drawVisioPath(page, path, plan.height);
+                if ("MenuToFunction".equals(path.name)) {
+                    connectEndpoint(page, connector, nodes.get("menu"), path.points[0], true, false);
+                    connectEndpoint(page, connector, nodes.get("function"), path.points[2], false, true);
+                } else if (path.name.startsWith("FunctionToData")) {
+                    String index = path.name.substring("FunctionToData".length());
+                    connectEndpoint(page, connector, nodes.get("function"), path.points[0], true, false);
+                    connectEndpoint(page, connector, nodes.get("data" + index),
+                            path.points[path.points.length - 2], false, true);
+                } else if (path.name.matches("Data[0-9]+ToOperations")) {
+                    String index = path.name.substring("Data".length(), path.name.indexOf("ToOperations"));
+                    connectEndpoint(page, connector, nodes.get("data" + index), path.points[0], true, false);
+                    connectEndpoint(page, connector, nodes.get("operations"),
+                            path.points[path.points.length - 2], false, true);
+                } else if ("OperationsToEnd".equals(path.name)) {
+                    connectEndpoint(page, connector, nodes.get("operations"), path.points[0], true, false);
+                    connectEndpoint(page, connector, nodes.get("end"),
+                            path.points[path.points.length - 2], false, true);
+                }
             }
-            for (Label label : plan.labels) addVisioText(page, label);
             diagram.save(absolute.toString(), SaveFileFormat.VSDX);
         } finally {
             diagram.dispose();
@@ -101,7 +143,7 @@ public final class ReferenceLibraryFlowRenderer {
         return new VisioDiagramArtifact(DiagramType.FLOW, absolute, previewPath);
     }
 
-    /** 校验仅包含功能名和三至四份数据名的业务输入。 */
+    /** 校验仅包含功能名和至少一份数据名的业务输入。 */
     private String[] inputs(JsonNode input) {
         if (input == null || !input.isObject() || input.size() != (input.has("persistenceLabel") ? 3 : 2)
                 || !input.has("function") || !input.has("inputs")) {
@@ -112,8 +154,8 @@ public final class ReferenceLibraryFlowRenderer {
             throw new IllegalArgumentException("persistenceLabel must be text with at most 40 characters");
         }
         JsonNode names = input.get("inputs");
-        if (names == null || !names.isArray() || names.size() < 3 || names.size() > 4) {
-            throw new IllegalArgumentException("library-flow requires three or four input names");
+        if (names == null || !names.isArray() || names.isEmpty()) {
+            throw new IllegalArgumentException("library-flow requires at least one input name");
         }
         String[] result = new String[names.size() + 1];
         result[0] = label(input.get("function"), "function");
@@ -145,146 +187,234 @@ public final class ReferenceLibraryFlowRenderer {
         return value.asText().trim();
     }
 
-    /** 根据参考图的相对位置建立单一绘制计划，供 VSDX 和 PNG 共用。 */
+    /** 根据输入数量构建单排水平布局，VSDX 和 PNG 共用同一计划。 */
     private Plan plan(String[] values) {
-        if (values.length == 5) return planFour(values);
-        Plan plan = new Plan(WIDTH);
-        plan.boxes.add(new Box("menu", 500, 55, 200, 80, true));
-        plan.boxes.add(new Box("function", 470, 200, 260, 90, false));
-        plan.boxes.add(new Box("data1", 105, 405, 265, 90, false));
-        plan.boxes.add(new Box("data2", 468, 405, 265, 90, false));
-        plan.boxes.add(new Box("data3", 830, 405, 265, 90, false));
-        plan.boxes.add(new Box("operations", 470, 620, 260, 310, false));
-        plan.boxes.add(new Box("end", 500, 1030, 200, 80, true));
-
-        plan.labels.add(new Label("menu", "菜单栏", 600, 95));
-        plan.labels.add(new Label("function", values[0], 600, 245));
-        plan.labels.add(new Label("data1", values[1], 237, 450));
-        plan.labels.add(new Label("data2", values[2], 600, 450));
-        plan.labels.add(new Label("data3", values[3], 962, 450));
-        plan.labels.add(new Label("add", "增", 502, 775));
-        plan.labels.add(new Label("delete", "删", 567, 775));
-        plan.labels.add(new Label("modify", "改", 632, 775));
-        plan.labels.add(new Label("query", "查", 697, 775));
-        plan.labels.add(new Label("end", "结束", 600, 1070));
-
-        plan.lines.add(new PathLine("MenuToFunction", true, 600, 135, 600, 200));
-        plan.lines.add(new PathLine("FunctionToLibraries", false, 600, 290, 600, 365));
-        plan.lines.add(new PathLine("LibraryTrunk", false, 237, 365, 962, 365));
-        plan.lines.add(new PathLine("ToData1", true, 237, 365, 237, 405));
-        plan.lines.add(new PathLine("ToData2", true, 600, 365, 600, 405));
-        plan.lines.add(new PathLine("ToData3", true, 962, 365, 962, 405));
-        plan.lines.add(new PathLine("Data1ToOperations", false, 237, 495, 237, 555));
-        plan.lines.add(new PathLine("Data2ToOperations", false, 600, 495, 600, 555));
-        plan.lines.add(new PathLine("Data3ToOperations", false, 962, 495, 962, 555));
-        plan.lines.add(new PathLine("OperationsCollector", false, 237, 555, 962, 555));
-        plan.lines.add(new PathLine("CollectorToOperations", true, 600, 555, 600, 620));
-        plan.lines.add(new PathLine("OperationDivider1", false, 535, 620, 535, 930));
-        plan.lines.add(new PathLine("OperationDivider2", false, 600, 620, 600, 930));
-        plan.lines.add(new PathLine("OperationDivider3", false, 665, 620, 665, 930));
-        plan.lines.add(new PathLine("OperationsToEnd", true, 600, 930, 600, 1030));
+        int count = values.length - 1;
+        int groupWidth = Math.toIntExact(count * 260L + (count - 1L) * DATA_GAP);
+        int width = Math.toIntExact(Math.max(WIDTH, groupWidth + 130L));
+        int operationsTop = 620;
+        int endTop = 1030;
+        Plan plan = new Plan(width, 1150);
+        int middle = width / 2;
+        int firstCenter = (width - groupWidth) / 2 + 130;
+        plan.boxes.add(new Box("menu", middle - 100, 55, 200, 80, true));
+        plan.boxes.add(new Box("function", middle - 130, 200, 260, 90, false));
+        plan.boxes.add(new Box("operations", middle - 130, operationsTop, 260, 310, false));
+        plan.boxes.add(new Box("end", middle - 100, endTop, 200, 80, true));
+        plan.labels.add(new Label("menu", "菜单栏", middle, 95));
+        plan.labels.add(new Label("function", values[0], middle, 245));
+        for (int index = 0; index < 4; index++) {
+            plan.labels.add(new Label("operation" + index, "增删改查".substring(index, index + 1),
+                    middle - 98 + index * 65, operationsTop + 155));
+        }
+        plan.labels.add(new Label("end", "结束", middle, endTop + 40));
+        plan.lines.add(new PathLine("MenuToFunction", true, middle, 135, middle, 196));
+        for (int index = 0; index < count; index++) {
+            String id = "data" + (index + 1);
+            int x = firstCenter + index * (260 + DATA_GAP);
+            int portX = middle - 130 + (index + 1) * 260 / (count + 1);
+            int maxDepth = (count - 1) / 2;
+            int depth = Math.min(index, count - 1 - index);
+            int offset = maxDepth == 0 ? 0 : depth * 45 / maxDepth;
+            plan.boxes.add(new Box(id, x - 130, 405, 260, 90, false));
+            plan.labels.add(new Label(id, values[index + 1], x, 450));
+            // 每对节点有独立的直角路线。不同层使用不同横向走线高度，避免共用母线。
+            plan.lines.add(orthogonalPath("FunctionToData" + (index + 1),
+                    portX, 290, x, 401, 320 + offset));
+            plan.lines.add(orthogonalPath("Data" + (index + 1) + "ToOperations",
+                    x, 495, portX, operationsTop - 4, 560 - offset));
+        }
+        // 进出连线均沿操作区和结束节点的中心轴，箭头准确指向节点中央。
+        int operationPortX = middle;
+        for (int index = 1; index <= 3; index++) {
+            int dividerX = middle - 130 + 65 * index;
+            plan.lines.add(new PathLine("OperationDivider" + index, false,
+                    dividerX, operationsTop, dividerX, operationsTop + 310));
+        }
+        plan.lines.add(new PathLine("OperationsToEnd", true,
+                operationPortX, operationsTop + 310, operationPortX, endTop - 4));
         return plan;
     }
 
-    /** 将同一固定模板扩展为四个并排的数据节点，并保持连接线为正交走线。 */
-    private Plan planFour(String[] values) {
-        Plan plan = new Plan(1500);
-        plan.boxes.add(new Box("menu", 650, 55, 200, 80, true));
-        plan.boxes.add(new Box("function", 620, 200, 260, 90, false));
-        int[] centers = {175, 550, 950, 1325};
-        for (int index = 0; index < centers.length; index++) {
-            plan.boxes.add(new Box("data" + (index + 1), centers[index] - 130, 405, 260, 90, false));
-            plan.labels.add(new Label("data" + (index + 1), values[index + 1], centers[index], 450));
-            plan.lines.add(new PathLine("ToData" + (index + 1), true,
-                    centers[index], 365, centers[index], 405));
-        }
-        plan.boxes.add(new Box("operations", 620, 620, 260, 310, false));
-        plan.boxes.add(new Box("end", 650, 1030, 200, 80, true));
-
-        plan.labels.add(new Label("menu", "菜单栏", 750, 95));
-        plan.labels.add(new Label("function", values[0], 750, 245));
-        plan.labels.add(new Label("add", "增", 652, 775));
-        plan.labels.add(new Label("delete", "删", 717, 775));
-        plan.labels.add(new Label("modify", "改", 782, 775));
-        plan.labels.add(new Label("query", "查", 847, 775));
-        plan.labels.add(new Label("end", "结束", 750, 1070));
-
-        plan.lines.add(new PathLine("MenuToFunction", true, 750, 135, 750, 200));
-        plan.lines.add(new PathLine("FunctionToLibraries", false, 750, 290, 750, 365));
-        plan.lines.add(new PathLine("LibraryTrunk", false, 175, 365, 1325, 365));
-        plan.lines.add(new PathLine("Data1ToOperations", false, 175, 495, 175, 555));
-        plan.lines.add(new PathLine("Data2ToOperations", false, 550, 495, 550, 555));
-        plan.lines.add(new PathLine("Data3ToOperations", false, 950, 495, 950, 555));
-        plan.lines.add(new PathLine("Data4ToOperations", false, 1325, 495, 1325, 555));
-        plan.lines.add(new PathLine("OperationsCollector", false, 175, 555, 1325, 555));
-        plan.lines.add(new PathLine("CollectorToOperations", true, 750, 555, 750, 620));
-        plan.lines.add(new PathLine("OperationDivider1", false, 685, 620, 685, 930));
-        plan.lines.add(new PathLine("OperationDivider2", false, 750, 620, 750, 930));
-        plan.lines.add(new PathLine("OperationDivider3", false, 815, 620, 815, 930));
-        plan.lines.add(new PathLine("OperationsToEnd", true, 750, 930, 750, 1030));
-        return plan;
+    /** 一根 Visio 连接线以垂直—水平—垂直的折线路由连接两个节点。 */
+    private PathLine orthogonalPath(String name, int fromX, int fromY,
+                                    int toX, int toY, int horizontalY) {
+        if (fromX == toX) return new PathLine(name, true, fromX, fromY, toX, toY);
+        return new PathLine(name, true, fromX, fromY, fromX, horizontalY,
+                toX, horizontalY, toX, toY);
     }
 
-    /** 将折线及末端箭头绘制为可编辑 Visio 线段。 */
-    private void drawVisioPath(Page page, PathLine path) throws Exception {
-        for (int index = 2; index < path.points.length; index += 2) {
-            segment(page, path.name, path.points[index - 2], path.points[index - 1],
-                    path.points[index], path.points[index + 1]);
+    /** 返回指定节点的文字，避免创建与节点分离的文本框。 */
+    private String labelText(Plan plan, String id) {
+        for (Label label : plan.labels) {
+            if (id.equals(label.id)) return label.text;
         }
+        throw new IllegalStateException("missing library-flow label: " + id);
+    }
+
+    /** 每对节点只创建一根原生一维 Visio 连接线，拐角是同一图形内的几何点。 */
+    private Shape drawVisioPath(Page page, PathLine path, int height) throws Exception {
+        int last = path.points.length - 2;
+        double beginX = path.points[0] / POINTS_PER_INCH;
+        double beginY = (height - path.points[1]) / POINTS_PER_INCH;
+        double endX = path.points[last] / POINTS_PER_INCH;
+        double endY = (height - path.points[last + 1]) / POINTS_PER_INCH;
+        Shape line = shape(page, page.drawLine(beginX, beginY, endX, endY));
+        line.getLine().setLineColor(new ColorValue("#000000", 0));
+        line.getLine().setLinePattern(new LinePattern(1));
+        line.getLine().setLineWeight(new DoubleValue(STROKE_WIDTH / POINTS_PER_INCH, 0));
         if (path.arrow) {
-            int length = path.points.length;
-            int x = path.points[length - 2];
-            int y = path.points[length - 1];
-            segment(page, path.name + "Arrow", x, y, x - 8, y - 15);
-            segment(page, path.name + "Arrow", x, y, x + 8, y - 15);
+            line.getLine().setEndArrow(new IntValue(4, 0));
+            line.getLine().setEndArrowSize(new ArrowSize(ArrowSizeValue.LARGE));
+        }
+        // 一维线的 Geometry 使用随 Begin/End 旋转的局部坐标。将每个折点投影到
+        // 该坐标系，Visio 中选中时才会是“一根连接线”，而非几条独立的直线。
+        if (path.points.length > 4) {
+            double dx = endX - beginX;
+            double dy = endY - beginY;
+            double distance = Math.hypot(dx, dy);
+            double cos = dx / distance;
+            double sin = dy / distance;
+            LineTo originalEnd = (LineTo) line.getGeoms().get(0).getCoordinateCol().get(1);
+            line.getGeoms().get(0).getCoordinateCol().remove(originalEnd);
+            for (int index = 2; index < last; index += 2) {
+                double worldX = path.points[index] / POINTS_PER_INCH - beginX;
+                double worldY = (height - path.points[index + 1]) / POINTS_PER_INCH - beginY;
+                LineTo turn = new LineTo();
+                turn.setIX(line.getGeoms().get(0).getCoordinateCol().getCount() + 1);
+                turn.getX().setValue(worldX * cos + worldY * sin);
+                turn.getY().setValue(-worldX * sin + worldY * cos);
+                line.getGeoms().get(0).getCoordinateCol().add(turn);
+            }
+            // The arrow belongs to the final leg, and every Geometry row needs a unique IX.
+            originalEnd.setIX(line.getGeoms().get(0).getCoordinateCol().getCount() + 1);
+            line.getGeoms().get(0).getCoordinateCol().add(originalEnd);
+        }
+        line.setNameU("LibraryLine_" + path.name + "_" + line.getID());
+        return line;
+    }
+
+    /**
+     * 在不改写连线几何的前提下建立 Visio 的节点连接关系。
+     *
+     * <p>通过连接点与 Connect 关系胶合一根完整的一维连接线的两端。</p>
+     */
+    private void connectEndpoint(Page page, Shape line, Shape node, int pointX,
+                                 boolean atBegin, boolean atTop) {
+        if (node == null) throw new IllegalStateException("missing Visio flowchart node");
+        Connection port = new Connection();
+        port.setIX(node.getConnections().getCount());
+        double nodeLeft = node.getXForm().getPinX().getValue()
+                - node.getXForm().getWidth().getValue() / 2D;
+        port.getX().setValue(pointX / POINTS_PER_INCH - nodeLeft);
+        // Visio 重新计算胶合公式后，终点仍须停在边框外 4pt；落在边框上会遮住原生箭头。
+        port.getY().setValue(atTop ? node.getXForm().getHeight().getValue()
+                + 4D / POINTS_PER_INCH : 0D);
+        node.getConnections().add(port);
+        String cell = atBegin ? "BeginX" : "EndX";
+        Connect connect = new Connect();
+        connect.setFromSheet(line.getID());
+        connect.setFromCell(cell);
+        connect.setFromPart(atBegin ? 9 : 12);
+        connect.setToSheet(node.getID());
+        connect.setToCell("Connections.X" + (port.getIX() + 1));
+        connect.setToPart(100);
+        page.getConnects().add(connect);
+        String formula = "PAR(PNT(Sheet." + node.getID() + "!Connections.X"
+                + (port.getIX() + 1) + ",Sheet." + node.getID() + "!Connections.Y"
+                + (port.getIX() + 1) + "))";
+        if (atBegin) {
+            line.getXForm1D().getBeginX().getUfe().setF(formula);
+            line.getXForm1D().getBeginY().getUfe().setF(formula);
+        } else {
+            line.getXForm1D().getEndX().getUfe().setF(formula);
+            line.getXForm1D().getEndY().getUfe().setF(formula);
         }
     }
 
     /** 绘制一个可编辑的矩形或四角圆弧框。 */
-    private void drawVisioBox(Page page, Box box) throws Exception {
+    private Shape drawVisioBox(Page page, Box box, int height, String label) throws Exception {
         if (!box.rounded) {
-            Shape shape = rectangle(page, box.x, box.y, box.width, box.height);
+            Shape shape = rectangle(page, box.x, box.y, box.width, box.height, height);
             shape.getFill().setFillForegnd(new ColorValue("#FFFFFF", 0));
             shape.getLine().setLineColor(new ColorValue("#000000", 0));
             shape.getLine().setLineWeight(new DoubleValue(STROKE_WIDTH / POINTS_PER_INCH, 0));
             shape.setNameU("LibraryBox_" + box.id);
-            return;
+            textOnShape(shape, label);
+            return shape;
         }
+        Shape shape = roundedBox(page, box, height);
+        shape.getFill().setFillForegnd(new ColorValue("#FFFFFF", 0));
+        shape.getLine().setLineColor(new ColorValue("#000000", 0));
+        shape.getLine().setLineWeight(new DoubleValue(STROKE_WIDTH / POINTS_PER_INCH, 0));
+        shape.setNameU("LibraryBox_" + box.id);
+        textOnShape(shape, label);
+        shape.getTextXForm().getTxtPinX().setValue(box.width / (2D * POINTS_PER_INCH));
+        shape.getTextXForm().getTxtPinY().setValue(box.height / (2D * POINTS_PER_INCH));
+        shape.getTextXForm().getTxtWidth().setValue(box.width / POINTS_PER_INCH);
+        shape.getTextXForm().getTxtHeight().setValue(box.height / POINTS_PER_INCH);
+        shape.getTextXForm().getTxtLocPinX().setValue(box.width / (2D * POINTS_PER_INCH));
+        shape.getTextXForm().getTxtLocPinY().setValue(box.height / (2D * POINTS_PER_INCH));
+        return shape;
+    }
+
+    /** 绘制一个闭合的原生圆角节点，文字可直接写在该节点内。 */
+    private Shape roundedBox(Page page, Box box, int height) throws Exception {
+        List<Double> points = new ArrayList<>();
         int radius = 36;
-        segment(page, "Rounded_" + box.id, box.x + radius, box.y, box.x + box.width - radius, box.y);
-        segment(page, "Rounded_" + box.id, box.x + radius, box.y + box.height,
-                box.x + box.width - radius, box.y + box.height);
-        segment(page, "Rounded_" + box.id, box.x, box.y + radius, box.x, box.y + box.height - radius);
-        segment(page, "Rounded_" + box.id, box.x + box.width, box.y + radius,
-                box.x + box.width, box.y + box.height - radius);
-        for (int corner = 0; corner < 4; corner++) {
-            double start = corner * Math.PI / 2D;
-            int cx = corner == 0 || corner == 3 ? box.x + box.width - radius : box.x + radius;
-            int cy = corner < 2 ? box.y + box.height - radius : box.y + radius;
-            for (int step = 0; step < 8; step++) {
-                double a = start + step * Math.PI / 16D;
-                double b = start + (step + 1) * Math.PI / 16D;
-                segment(page, "Rounded_" + box.id,
-                        cx + (int) Math.round(radius * Math.cos(a)),
-                        cy + (int) Math.round(radius * Math.sin(a)),
-                        cx + (int) Math.round(radius * Math.cos(b)),
-                        cy + (int) Math.round(radius * Math.sin(b)));
-            }
+        addPoint(points, box.x + radius, box.y, height);
+        addPoint(points, box.x + box.width - radius, box.y, height);
+        addArc(points, box.x + box.width - radius, box.y + radius, radius,
+                -Math.PI / 2D, 0D, height);
+        addPoint(points, box.x + box.width, box.y + box.height - radius, height);
+        addArc(points, box.x + box.width - radius, box.y + box.height - radius,
+                radius, 0D, Math.PI / 2D, height);
+        addPoint(points, box.x + radius, box.y + box.height, height);
+        addArc(points, box.x + radius, box.y + box.height - radius,
+                radius, Math.PI / 2D, Math.PI, height);
+        addPoint(points, box.x, box.y + radius, height);
+        addArc(points, box.x + radius, box.y + radius,
+                radius, Math.PI, 3D * Math.PI / 2D, height);
+        addPoint(points, box.x + radius, box.y, height);
+        double[] xy = new double[points.size()];
+        double left = box.x / POINTS_PER_INCH;
+        double bottom = (height - box.y - box.height) / POINTS_PER_INCH;
+        for (int index = 0; index < xy.length; index += 2) {
+            xy[index] = points.get(index) - left;
+            xy[index + 1] = points.get(index + 1) - bottom;
+        }
+        Shape result = shape(page, page.drawPolyline(xy));
+        result.getXForm().getPinX().setValue((box.x + box.width / 2D) / POINTS_PER_INCH);
+        result.getXForm().getPinY().setValue((height - box.y - box.height / 2D) / POINTS_PER_INCH);
+        result.getXForm().getLocPinX().setValue(box.width / (2D * POINTS_PER_INCH));
+        result.getXForm().getLocPinY().setValue(box.height / (2D * POINTS_PER_INCH));
+        return result;
+    }
+
+    /** 将圆弧分解为原生 Shape 中连续的折线点。 */
+    private void addArc(List<Double> points, int cx, int cy, int radius,
+                        double from, double to, int height) {
+        for (int step = 1; step <= 8; step++) {
+            double angle = from + (to - from) * step / 8D;
+            addPoint(points, cx + radius * Math.cos(angle),
+                    cy + radius * Math.sin(angle), height);
         }
     }
 
-    /** 在 Visio 中添加居中可编辑文本。 */
-    private void addVisioText(Page page, Label label) {
-        Shape shape = page.addText(label.x / POINTS_PER_INCH, (HEIGHT - label.y) / POINTS_PER_INCH,
-                260D / POINTS_PER_INCH, 55D / POINTS_PER_INCH, "");
-        shape.setNameU("LibraryText_" + label.id);
-        shape.getLine().setLineColor(new ColorValue("#FFFFFF", 0));
+    /** 将页面顶部为原点的坐标转为 Visio 英寸坐标。 */
+    private void addPoint(List<Double> points, double x, double y, int height) {
+        points.add(x / POINTS_PER_INCH);
+        points.add((height - y) / POINTS_PER_INCH);
+    }
+
+    /** 把文字及字体样式写入节点 Shape 自身。 */
+    private void textOnShape(Shape shape, String value) {
         shape.getTextBlock().setLeftMargin(new DoubleValue(0D, 0));
         shape.getTextBlock().setRightMargin(new DoubleValue(0D, 0));
         shape.getTextBlock().setTopMargin(new DoubleValue(0D, 0));
         shape.getTextBlock().setBottomMargin(new DoubleValue(0D, 0));
         shape.getTextBlock().setVerticalAlign(new VerticalAlign(VerticalAlignValue.MIDDLE));
-        shape.getText().getValue().clear();
+        shape.setText(new Text());
         shape.getParas().clear();
         shape.getChars().clear();
         Para paragraph = new Para();
@@ -300,24 +430,13 @@ public final class ReferenceLibraryFlowRenderer {
         shape.getChars().add(character);
         shape.getText().getValue().add(new Pp(0));
         shape.getText().getValue().add(new Cp(0));
-        shape.getText().getValue().add(new Txt(label.text));
-    }
-
-    /** 创建一段命名的黑色 Visio 直线。 */
-    private void segment(Page page, String name, int x1, int y1, int x2, int y2) throws Exception {
-        long id = page.drawLine(x1 / POINTS_PER_INCH, (HEIGHT - y1) / POINTS_PER_INCH,
-                x2 / POINTS_PER_INCH, (HEIGHT - y2) / POINTS_PER_INCH);
-        Shape shape = shape(page, id);
-        shape.getLine().setLineColor(new ColorValue("#000000", 0));
-        shape.getLine().setLineWeight(new DoubleValue(STROKE_WIDTH / POINTS_PER_INCH, 0));
-        shape.setNameU("LibraryLine_" + name + "_" + id);
+        shape.getText().getValue().add(new Txt(value));
     }
 
     /** 创建矩形 Visio Shape。 */
-    private Shape rectangle(Page page, int x, int y, int width, int height) throws Exception {
-        long id = page.drawRectangle((x + width / 2D) / POINTS_PER_INCH,
-                (HEIGHT - y - height / 2D) / POINTS_PER_INCH,
-                width / POINTS_PER_INCH, height / POINTS_PER_INCH);
+    private Shape rectangle(Page page, int x, int y, int width, int height, int canvasHeight) throws Exception {
+        long id = page.drawRectangle(x / POINTS_PER_INCH, (canvasHeight - y - height) / POINTS_PER_INCH,
+                (x + width) / POINTS_PER_INCH, (canvasHeight - y) / POINTS_PER_INCH);
         return shape(page, id);
     }
 
@@ -332,13 +451,13 @@ public final class ReferenceLibraryFlowRenderer {
 
     /** 由同一绘制计划生成白底 PNG，避免评估版 Visio 对中文预览的限制。 */
     private void preview(Plan plan, Path output) throws Exception {
-        BufferedImage image = new BufferedImage(plan.width, HEIGHT, BufferedImage.TYPE_INT_RGB);
+        BufferedImage image = new BufferedImage(plan.width, plan.height, BufferedImage.TYPE_INT_RGB);
         Graphics2D graphics = image.createGraphics();
         try {
             graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             graphics.setColor(Color.WHITE);
-            graphics.fillRect(0, 0, plan.width, HEIGHT);
+            graphics.fillRect(0, 0, plan.width, plan.height);
             graphics.setStroke(new BasicStroke(STROKE_WIDTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
             graphics.setColor(Color.BLACK);
             for (PathLine line : plan.lines) {
@@ -356,7 +475,7 @@ public final class ReferenceLibraryFlowRenderer {
         ImageIO.write(image, "png", output.toFile());
     }
 
-    /** 绘制 PNG 折线和实心箭头。 */
+    /** 绘制 PNG 连线；箭头按最后一段方向放置，与 VSDX 的原生箭头一致。 */
     private void previewPath(Graphics2D graphics, PathLine line) {
         Path2D path = new Path2D.Double();
         path.moveTo(line.points[0], line.points[1]);
@@ -368,10 +487,19 @@ public final class ReferenceLibraryFlowRenderer {
             int length = line.points.length;
             int x = line.points[length - 2];
             int y = line.points[length - 1];
+            double dx = x - line.points[length - 4];
+            double dy = y - line.points[length - 3];
+            double magnitude = Math.hypot(dx, dy);
+            double alongX = dx / magnitude;
+            double alongY = dy / magnitude;
+            double baseX = x - alongX * 15D;
+            double baseY = y - alongY * 15D;
+            double normalX = -alongY * 8D;
+            double normalY = alongX * 8D;
             Path2D arrow = new Path2D.Double();
             arrow.moveTo(x, y);
-            arrow.lineTo(x - 8, y - 15);
-            arrow.lineTo(x + 8, y - 15);
+            arrow.lineTo(baseX + normalX, baseY + normalY);
+            arrow.lineTo(baseX - normalX, baseY - normalY);
             arrow.closePath();
             graphics.fill(arrow);
         }
@@ -404,6 +532,8 @@ public final class ReferenceLibraryFlowRenderer {
     private static final class Plan {
         /** 根据数据节点数量选择的画布宽度。 */
         private final int width;
+        /** 单排数据节点使用的固定画布高度。 */
+        private final int height;
         /** 矩形和圆角框。 */
         private final List<Box> boxes = new ArrayList<>();
         /** 正交连线及分隔线。 */
@@ -411,8 +541,9 @@ public final class ReferenceLibraryFlowRenderer {
         /** 所有可见文字。 */
         private final List<Label> labels = new ArrayList<>();
 
-        private Plan(int width) {
+        private Plan(int width, int height) {
             this.width = width;
+            this.height = height;
         }
     }
 

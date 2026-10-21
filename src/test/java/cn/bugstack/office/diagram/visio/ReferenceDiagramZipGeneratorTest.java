@@ -87,6 +87,65 @@ class ReferenceDiagramZipGeneratorTest {
     }
 
     /**
+     * ZIP 批量入口也应接受五个以上数据节点，与直接调用渲染器保持一致。
+     *
+     * @throws Exception ZIP 与 Visio 输出失败时抛出
+     */
+    @Test
+    void acceptsDynamicInputCountInZip() throws Exception {
+        Path zip = temporaryDirectory.resolve("many-inputs.zip");
+        Path output = temporaryDirectory.resolve("many-inputs-output");
+        writeZip(zip, Map.of("模块/库管理/diagram.json",
+                "{\"function\":\"库管理\",\"inputs\":[\"数据1\",\"数据2\",\"数据3\","
+                        + "\"数据4\",\"数据5\",\"数据6\"]}"));
+        List<VisioDiagramArtifact> artifacts = new ReferenceDiagramZipGenerator().generate(zip, output);
+        assertEquals(2, artifacts.size());
+        assertFeature(output, "模块", "库管理");
+    }
+
+    /** 同一 ZIP 可显式选用标准 Visio 母版，保留数据流图及增删改查阶段。 */
+    @Test
+    void generatesStandardFlowFromJsonZip() throws Exception {
+        Path example = Path.of("target/reference-diagram-zip-standard-example");
+        Path zip = example.resolve("标准流程图输入.zip");
+        Map<String, String> entries = new LinkedHashMap<>();
+        entries.put("任务管理模块/功能3/diagram.json",
+                "{\"function\":\"功能3\",\"inputs\":[\"数据1\",\"数据2\",\"数据3\",\"数据4\"]}");
+        entries.put("库管理模块/功能4/diagram.json",
+                "{\"function\":\"功能4\",\"inputs\":[\"条件库\"]}");
+        writeZip(zip, entries);
+
+        Path output = example.resolve("generated");
+        List<VisioDiagramArtifact> artifacts = new ReferenceDiagramZipGenerator()
+                .generateWithStandardFlow(zip, output);
+
+        assertEquals(4, artifacts.size());
+        assertStandardFeature(output, "任务管理模块", "功能3");
+        assertStandardFeature(output, "库管理模块", "功能4");
+        Diagram diagram = new Diagram(output.resolve("任务管理模块/功能3/visio/功能3-标准流程图.vsdx")
+                .toString());
+        try {
+            boolean operations = false;
+            boolean fourthData = false;
+            int nativeConnectors = 0;
+            for (int index = 0; index < diagram.getPages().getPage(0).getShapes().getCount(); index++) {
+                com.aspose.diagram.Shape shape = diagram.getPages().getPage(0).getShapes().get(index);
+                operations |= "StandardFlow_Operation4".equals(shape.getNameU())
+                        && "查".equals(shape.getPureText());
+                fourthData |= "StandardFlow_Data4".equals(shape.getNameU())
+                        && "数据4".equals(shape.getPureText().trim());
+                nativeConnectors += shape.getMaster() != null
+                        && "Dynamic connector".equals(shape.getMaster().getNameU()) ? 1 : 0;
+            }
+            assertTrue(operations);
+            assertTrue(fourthData);
+            assertEquals(10, nativeConnectors);
+        } finally {
+            diagram.dispose();
+        }
+    }
+
+    /**
      * 校验目录穿越、同一功能多个 JSON 和目录/内容名称不一致均在落盘前拒绝。
      *
      * @throws Exception ZIP 写入失败时抛出
@@ -144,6 +203,18 @@ class ReferenceDiagramZipGeneratorTest {
         assertTrue(Files.isRegularFile(directory.resolve(function + "-数据流图.preview.png")));
         assertTrue(Files.isRegularFile(directory.resolve(function + "-库管理流程图.vsdx")));
         assertTrue(Files.isRegularFile(directory.resolve(function + "-库管理流程图.preview.png")));
+        try (java.util.stream.Stream<Path> files = Files.list(directory)) {
+            assertEquals(4L, files.count());
+        }
+    }
+
+    /** 确认显式标准流程图模式的两张图及预览按功能落盘。 */
+    private void assertStandardFeature(Path output, String module, String function) throws IOException {
+        Path directory = output.resolve(module).resolve(function).resolve("visio");
+        assertTrue(Files.isRegularFile(directory.resolve(function + "-数据流图.vsdx")));
+        assertTrue(Files.isRegularFile(directory.resolve(function + "-数据流图.preview.png")));
+        assertTrue(Files.isRegularFile(directory.resolve(function + "-标准流程图.vsdx")));
+        assertTrue(Files.isRegularFile(directory.resolve(function + "-标准流程图.preview.png")));
         try (java.util.stream.Stream<Path> files = Files.list(directory)) {
             assertEquals(4L, files.count());
         }

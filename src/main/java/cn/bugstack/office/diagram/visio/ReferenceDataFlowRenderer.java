@@ -16,6 +16,7 @@ import com.aspose.diagram.Pp;
 import com.aspose.diagram.SaveFileFormat;
 import com.aspose.diagram.Shape;
 import com.aspose.diagram.StrValue;
+import com.aspose.diagram.Text;
 import com.aspose.diagram.Txt;
 import com.aspose.diagram.VerticalAlign;
 import com.aspose.diagram.VerticalAlignValue;
@@ -40,10 +41,12 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 /**
- * 根据两到四个输入名称和一个功能名称绘制固定参考样式的可编辑数据流图和 PNG 预览。
+ * 根据任意数量的输入名称和一个功能名称绘制参考样式的可编辑数据流图和 PNG 预览。
  *
  * <p>保留白底、黑线、波浪底边文档、矩形处理、圆柱数据库和圆形渐变图标。
  * 拍摄屏幕产生的摩尔纹不属于图形底色，不在输出中复制。</p>
@@ -62,7 +65,7 @@ public final class ReferenceDataFlowRenderer {
     private final ObjectMapper mapper = new ObjectMapper();
 
     /**
-     * 读取两到四个输入名称及功能名称，套用固定参考样式生成 VSDX 与 PNG。
+     * 读取至少一个输入名称及功能名称，套用参考样式生成 VSDX 与 PNG。
      *
      * @param jsonPath 仅含 {@code inputs} 数组与 {@code function} 名称的业务输入文件
      * @param vsdxPath 可编辑 Visio 输出路径
@@ -85,15 +88,9 @@ public final class ReferenceDataFlowRenderer {
             int height = spec.get("height").asInt();
             page.getPageSheet().getPageProps().getPageWidth().setValue(width / POINTS_PER_INCH);
             page.getPageSheet().getPageProps().getPageHeight().setValue(height / POINTS_PER_INCH);
-            Shape background = rectangle(page, 0, 0, width, height, height);
-            fill(background, spec.get("background").asText());
-            background.getLine().setLineColor(new ColorValue(spec.get("background").asText(), 0));
-            background.setNameU("DataFlowBackground");
+            // 页面默认白底；不要加入会干扰选中和复制的整页背景 Shape。
             for (JsonNode edge : spec.get("edges")) drawVisioEdge(page, edge, spec);
             for (JsonNode node : spec.get("nodes")) drawVisioNode(page, node, spec);
-            JsonNode center = spec.get("captionCenter");
-            text(page, center.get(0).asInt(), center.get(1).asInt() - 22, 650, 46,
-                    spec.get("caption").asText(), spec, height, "DataFlowCaption");
             diagram.save(absolute.toString(), SaveFileFormat.VSDX);
             preview(spec, preview);
             return new VisioDiagramArtifact(DiagramType.DATA_FLOW, absolute, preview);
@@ -103,7 +100,7 @@ public final class ReferenceDataFlowRenderer {
     }
 
     /**
-     * 把两到四份业务输入、功能名称及可选的持久化标注填入内置布局。
+     * 把业务输入、功能名称及可选的持久化标注填入动态布局。
      *
      * @param input 调用方输入配置
      * @return 已替换文档节点名称的完整布局
@@ -115,8 +112,8 @@ public final class ReferenceDataFlowRenderer {
             throw new IllegalArgumentException("data-flow JSON only accepts inputs, function and persistenceLabel");
         }
         JsonNode names = input.get("inputs");
-        if (names == null || !names.isArray() || names.size() < 2 || names.size() > 4) {
-            throw new IllegalArgumentException("data-flow inputs must contain two to four names");
+        if (names == null || !names.isArray() || names.isEmpty()) {
+            throw new IllegalArgumentException("data-flow requires at least one input name");
         }
         for (JsonNode name : names) {
             if (!name.isTextual() || name.asText().isBlank() || name.asText().length() > 40) {
@@ -140,8 +137,7 @@ public final class ReferenceDataFlowRenderer {
         try (InputStream stream = resource) {
             JsonNode spec = mapper.readTree(stream);
             if (spec == null || !spec.isObject()) throw new IOException("invalid data-flow layout resource");
-            if (names.size() >= 3) addThirdInput(spec);
-            if (names.size() == 4) addFourthInput(spec);
+            layoutInputs(spec, names.size());
             BufferedImage measureImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
             Graphics2D measure = measureImage.createGraphics();
             try {
@@ -149,8 +145,7 @@ public final class ReferenceDataFlowRenderer {
                 FontMetrics metrics = measure.getFontMetrics(font);
                 for (JsonNode node : spec.get("nodes")) {
                     String id = node.get("id").asText();
-                    int inputIndex = "data1".equals(id) ? 0 : "data2".equals(id) ? 1
-                            : "data3".equals(id) ? 2 : "data4".equals(id) ? 3 : -1;
+                    int inputIndex = id.matches("data[0-9]+") ? Integer.parseInt(id.substring(4)) - 1 : -1;
                     if (inputIndex < 0 && !"function".equals(id)) continue;
                     String label = inputIndex < 0 ? function : names.get(inputIndex).asText().trim();
                     if (metrics.stringWidth(label) > integer(node, "width") - 24) {
@@ -178,11 +173,6 @@ public final class ReferenceDataFlowRenderer {
                         ((ObjectNode) storageEdge).put("label", persistenceLabel);
                     }
                 }
-                String caption = required(spec, "caption").replace("功能1", function);
-                if (metrics.stringWidth(caption) > 650) {
-                    throw new IllegalArgumentException("data-flow caption exceeds fixed width: " + caption);
-                }
-                ((ObjectNode) spec).put("caption", caption);
             } finally {
                 measure.dispose();
             }
@@ -190,48 +180,59 @@ public final class ReferenceDataFlowRenderer {
         }
     }
 
-    /**
-     * 在参考图左下方加入第三份文档，并接入所有输入共用的竖向主干。
-     *
-     * @param spec 内置参考布局的可变 JSON 树
-     */
-    private void addThirdInput(JsonNode spec) {
-        ObjectNode third = ((ObjectNode) spec.get("nodes").get(1)).deepCopy();
-        third.put("id", "data3");
-        third.put("y", 540);
-        ((ArrayNode) spec.get("nodes")).add(third);
-
-        ObjectNode edge = mapper.createObjectNode();
-        edge.put("from", "data3");
-        edge.put("to", "function");
-        ArrayNode points = edge.putArray("points");
-        points.addArray().add(370).add(597);
-        points.addArray().add(440).add(597);
-        points.addArray().add(440).add(405);
-        ((ArrayNode) spec.get("edges")).add(edge);
-    }
-
-    /**
-     * 扩高画布并把第四份文档接到同一竖向主干；原有三份输入位置不变。
-     *
-     * @param spec 已包含第三份输入的参考布局
-     */
-    private void addFourthInput(JsonNode spec) {
-        ((ObjectNode) spec).put("height", 1000);
-        ((ArrayNode) spec.get("captionCenter")).set(1, mapper.getNodeFactory().numberNode(944));
-        ObjectNode fourth = ((ObjectNode) spec.get("nodes").get(1)).deepCopy();
-        fourth.put("id", "data4");
-        fourth.put("y", 730);
-        ((ArrayNode) spec.get("nodes")).add(fourth);
-
-        ObjectNode edge = mapper.createObjectNode();
-        edge.put("from", "data4");
-        edge.put("to", "function");
-        ArrayNode points = edge.putArray("points");
-        points.addArray().add(370).add(787);
-        points.addArray().add(440).add(787);
-        points.addArray().add(440).add(597);
-        ((ArrayNode) spec.get("edges")).add(edge);
+    /** 所有输入文档按 JSON 顺序在左侧纵向排列；增加输入时扩展画布高度。 */
+    private void layoutInputs(JsonNode spec, int count) {
+        long lastDocumentTop = 40L + (count - 1L) * 190L;
+        int functionTop = Math.toIntExact(Math.max(210L, 97L + (count - 1L) * 95L - 40L));
+        int functionCenter = functionTop + 40;
+        int canvasHeight = Math.toIntExact(Math.max(800L,
+                Math.max(lastDocumentTop + 200L, functionTop + 494L)));
+        ((ObjectNode) spec).put("height", canvasHeight);
+        ArrayNode oldNodes = (ArrayNode) spec.get("nodes");
+        ObjectNode documentTemplate = ((ObjectNode) oldNodes.get(0)).deepCopy();
+        ObjectNode function = ((ObjectNode) oldNodes.get(2)).deepCopy();
+        ObjectNode database = ((ObjectNode) oldNodes.get(3)).deepCopy();
+        ObjectNode control = ((ObjectNode) oldNodes.get(4)).deepCopy();
+        function.put("y", functionTop);
+        database.put("y", functionTop - 37);
+        control.put("y", functionTop + 240);
+        ArrayNode nodes = mapper.createArrayNode();
+        ArrayNode edges = mapper.createArrayNode();
+        for (int index = 0; index < count; index++) {
+            int top = Math.toIntExact(40L + index * 190L);
+            int center = top + 58;
+            ObjectNode document = documentTemplate.deepCopy();
+            document.put("id", "data" + (index + 1));
+            document.put("y", top);
+            nodes.add(document);
+            ObjectNode edge = mapper.createObjectNode();
+            edge.put("from", "data" + (index + 1));
+            edge.put("to", "function");
+            ArrayNode points = edge.putArray("points");
+            points.addArray().add(365).add(center);
+            points.addArray().add(440).add(center);
+            points.addArray().add(440).add(functionCenter);
+            points.addArray().add(526).add(functionCenter);
+            edges.add(edge);
+        }
+        nodes.add(function);
+        nodes.add(database);
+        nodes.add(control);
+        ObjectNode storage = ((ObjectNode) spec.get("edges").get(2)).deepCopy();
+        ArrayNode storagePoints = (ArrayNode) storage.get("points");
+        for (JsonNode point : storagePoints) {
+            ((ArrayNode) point).set(1, mapper.getNodeFactory().numberNode(functionCenter));
+        }
+        ((ArrayNode) storage.get("labelCenter")).set(1,
+                mapper.getNodeFactory().numberNode(functionCenter - 2));
+        edges.add(storage);
+        ObjectNode controlEdge = ((ObjectNode) spec.get("edges").get(3)).deepCopy();
+        ArrayNode controlPoints = (ArrayNode) controlEdge.get("points");
+        ((ArrayNode) controlPoints.get(0)).set(1, mapper.getNodeFactory().numberNode(functionTop + 80));
+        ((ArrayNode) controlPoints.get(1)).set(1, mapper.getNodeFactory().numberNode(functionTop + 240));
+        edges.add(controlEdge);
+        ((ObjectNode) spec).set("nodes", nodes);
+        ((ObjectNode) spec).set("edges", edges);
     }
 
     /**
@@ -242,7 +243,7 @@ public final class ReferenceDataFlowRenderer {
     private void validate(JsonNode spec) {
         int width = integer(spec, "width");
         int height = integer(spec, "height");
-        if (width < 400 || width > 3000 || height < 300 || height > 2000) {
+        if (width < 400 || height < 300) {
             throw new IllegalArgumentException("data-flow canvas dimensions are out of range");
         }
         if (integer(spec, "strokeWidth") < 1 || integer(spec, "strokeWidth") > 10
@@ -255,13 +256,11 @@ public final class ReferenceDataFlowRenderer {
             }
         }
         required(spec, "fontFamily");
-        required(spec, "caption");
-        point(spec.get("captionCenter"), width, height);
         JsonNode nodes = spec.get("nodes");
         JsonNode edges = spec.get("edges");
-        if (nodes == null || !nodes.isArray() || nodes.size() < 5 || nodes.size() > 7
+        if (nodes == null || !nodes.isArray() || nodes.size() < 4
                 || edges == null || !edges.isArray() || edges.size() != nodes.size() - 1) {
-            throw new IllegalArgumentException("reference data-flow requires two to four inputs");
+            throw new IllegalArgumentException("reference data-flow requires at least one input");
         }
         Set<String> ids = new HashSet<>();
         Set<String> kinds = new HashSet<>();
@@ -334,25 +333,46 @@ public final class ReferenceDataFlowRenderer {
         String kind = required(node, "kind");
         String name = required(node, "id");
         if ("DOCUMENT".equals(kind)) {
-            line(page, x, y, x + w, y, spec, canvasHeight, name);
-            line(page, x, y, x, y + h - 12, spec, canvasHeight, name);
-            line(page, x + w, y, x + w, y + h - 12, spec, canvasHeight, name);
-            for (int i = 0; i < 36; i++) {
-                int ax = x + (int) Math.round(w * i / 36D);
-                int bx = x + (int) Math.round(w * (i + 1) / 36D);
-                line(page, ax, documentWaveY(y, h, i / 36D), bx,
-                        documentWaveY(y, h, (i + 1) / 36D), spec, canvasHeight, name);
+            List<Double> points = new ArrayList<>();
+            addVisioPoint(points, x, y, canvasHeight);
+            addVisioPoint(points, x + w, y, canvasHeight);
+            addVisioPoint(points, x + w, y + h - DOCUMENT_WAVE, canvasHeight);
+            for (int index = 35; index >= 0; index--) {
+                addVisioPoint(points, x + w * index / 36D,
+                        documentWaveY(y, h, index / 36D), canvasHeight);
             }
+            addVisioPoint(points, x, y, canvasHeight);
+            Shape document = polyline(page, points, x, y, w, h, canvasHeight);
+            decorate(document, spec, name);
+            textOnShape(document, required(node, "label"), spec);
+            positionPolylineText(document, w, h);
         } else if ("PROCESS".equals(kind)) {
             Shape shape = rectangle(page, x, y, w, h, canvasHeight);
             decorate(shape, spec, name);
+            textOnShape(shape, required(node, "label"), spec);
         } else if ("DATABASE".equals(kind)) {
-            line(page, x + CYLINDER_CURVE, y, x + w - CYLINDER_CURVE, y, spec, canvasHeight, name);
-            line(page, x + CYLINDER_CURVE, y + h, x + w - CYLINDER_CURVE, y + h, spec, canvasHeight, name);
-            cylinderArc(page, x + CYLINDER_CURVE, y + h / 2, CYLINDER_CURVE, h / 2,
-                    Math.PI / 2, 3 * Math.PI / 2, spec, canvasHeight, name);
-            cylinderArc(page, x + w - CYLINDER_CURVE, y + h / 2, CYLINDER_CURVE, h / 2,
-                    -Math.PI / 2, 3 * Math.PI / 2, spec, canvasHeight, name);
+            List<Double> points = new ArrayList<>();
+            addVisioPoint(points, x + CYLINDER_CURVE, y, canvasHeight);
+            addVisioPoint(points, x + w - CYLINDER_CURVE, y, canvasHeight);
+            for (int index = 1; index <= 24; index++) {
+                double angle = -Math.PI / 2D + Math.PI * index / 24D;
+                addVisioPoint(points, x + w - CYLINDER_CURVE + CYLINDER_CURVE * Math.cos(angle),
+                        y + h / 2D + h / 2D * Math.sin(angle), canvasHeight);
+            }
+            addVisioPoint(points, x + CYLINDER_CURVE, y + h, canvasHeight);
+            for (int index = 1; index <= 24; index++) {
+                double angle = Math.PI / 2D + Math.PI * index / 24D;
+                addVisioPoint(points, x + CYLINDER_CURVE + CYLINDER_CURVE * Math.cos(angle),
+                        y + h / 2D + h / 2D * Math.sin(angle), canvasHeight);
+            }
+            Shape database = polyline(page, points, x, y, w, h, canvasHeight);
+            decorate(database, spec, name);
+            textOnShape(database, required(node, "label"), spec);
+            positionPolylineText(database, w, h);
+            // 圆柱前端的内部弧独立绘制，文字仍属于圆柱主体 Shape。
+            cylinderArc(page, x + w - CYLINDER_CURVE, y + h / 2,
+                    CYLINDER_CURVE, h / 2, Math.PI / 2D, 3D * Math.PI / 2D,
+                    spec, canvasHeight, name + "_InnerArc");
         } else {
             Shape outer = ellipse(page, x, y, w, h, canvasHeight);
             decorate(outer, spec, name);
@@ -372,10 +392,40 @@ public final class ReferenceDataFlowRenderer {
             line(page, sx + square, sy + square, sx, sy + square, spec, canvasHeight, name + "_Square");
             line(page, sx, sy + square, sx, sy, spec, canvasHeight, name + "_Square");
         }
-        if (!"CONTROL_ICON".equals(kind)) {
-            text(page, x + w / 2, y + h / 2 - 22, w - 24, 44, required(node, "label"),
-                    spec, canvasHeight, name + "_Label");
+    }
+
+    /** 创建可填充、可直接编辑内部文字的闭合折线 Shape。 */
+    private Shape polyline(Page page, List<Double> points,
+                           int x, int y, int w, int h, int canvasHeight) throws Exception {
+        double[] xy = new double[points.size()];
+        double left = x / POINTS_PER_INCH;
+        double bottom = (canvasHeight - y - h) / POINTS_PER_INCH;
+        for (int index = 0; index < xy.length; index += 2) {
+            xy[index] = points.get(index) - left;
+            xy[index + 1] = points.get(index + 1) - bottom;
         }
+        Shape result = shape(page, page.drawPolyline(xy));
+        result.getXForm().getPinX().setValue((x + w / 2D) / POINTS_PER_INCH);
+        result.getXForm().getPinY().setValue((canvasHeight - y - h / 2D) / POINTS_PER_INCH);
+        result.getXForm().getLocPinX().setValue(w / (2D * POINTS_PER_INCH));
+        result.getXForm().getLocPinY().setValue(h / (2D * POINTS_PER_INCH));
+        return result;
+    }
+
+    /** 将绘图坐标添加为 Visio 页面的英寸坐标。 */
+    private void addVisioPoint(List<Double> points, double x, double y, int height) {
+        points.add(x / POINTS_PER_INCH);
+        points.add((height - y) / POINTS_PER_INCH);
+    }
+
+    /** 折线 Shape 使用本地几何坐标，文本块也应相对节点居中。 */
+    private void positionPolylineText(Shape shape, int w, int h) {
+        shape.getTextXForm().getTxtPinX().setValue(w / (2D * POINTS_PER_INCH));
+        shape.getTextXForm().getTxtPinY().setValue(h / (2D * POINTS_PER_INCH));
+        shape.getTextXForm().getTxtWidth().setValue(w / POINTS_PER_INCH);
+        shape.getTextXForm().getTxtHeight().setValue(h / POINTS_PER_INCH);
+        shape.getTextXForm().getTxtLocPinX().setValue(w / (2D * POINTS_PER_INCH));
+        shape.getTextXForm().getTxtLocPinY().setValue(h / (2D * POINTS_PER_INCH));
     }
 
     /** 绘制数据库椭圆端的局部弧。 */
@@ -390,15 +440,22 @@ public final class ReferenceDataFlowRenderer {
         }
     }
 
-    /** 按 JSON 中的正交折线绘制无箭头数据流及其标注。 */
+    /** 按 JSON 中的正交路径绘制无箭头的原生 Visio 线段。 */
     private void drawVisioEdge(Page page, JsonNode edge, JsonNode spec) throws Exception {
         JsonNode points = edge.get("points");
         int height = integer(spec, "height");
-        for (int i = 1; i < points.size(); i++) {
-            JsonNode from = points.get(i - 1);
-            JsonNode to = points.get(i);
-            line(page, from.get(0).asInt(), from.get(1).asInt(), to.get(0).asInt(), to.get(1).asInt(),
-                    spec, height, "Flow_" + required(edge, "from") + "_" + required(edge, "to"));
+        String name = "Flow_" + required(edge, "from") + "_" + required(edge, "to");
+        for (int index = 1; index < points.size(); index++) {
+            JsonNode from = points.get(index - 1);
+            JsonNode to = points.get(index);
+            long id = page.drawLine(from.get(0).asDouble() / POINTS_PER_INCH,
+                    (height - from.get(1).asDouble()) / POINTS_PER_INCH,
+                    to.get(0).asDouble() / POINTS_PER_INCH,
+                    (height - to.get(1).asDouble()) / POINTS_PER_INCH);
+            Shape connector = shape(page, id);
+            connector.getLine().setLineColor(new ColorValue(required(spec, "stroke"), 0));
+            connector.getLine().setLineWeight(new DoubleValue(integer(spec, "strokeWidth") / POINTS_PER_INCH, 0));
+            connector.setNameU(name + "_" + id);
         }
         if (edge.has("label")) {
             JsonNode center = edge.get("labelCenter");
@@ -433,8 +490,8 @@ public final class ReferenceDataFlowRenderer {
 
     /** 创建矩形原生 Shape。 */
     private Shape rectangle(Page page, int x, int y, int w, int h, int height) throws Exception {
-        return shape(page, page.drawRectangle((x + w / 2D) / POINTS_PER_INCH,
-                (height - y - h / 2D) / POINTS_PER_INCH, w / POINTS_PER_INCH, h / POINTS_PER_INCH));
+        return shape(page, page.drawRectangle(x / POINTS_PER_INCH, (height - y - h) / POINTS_PER_INCH,
+                (x + w) / POINTS_PER_INCH, (height - y) / POINTS_PER_INCH));
     }
 
     /** 创建椭圆原生 Shape。 */
@@ -471,12 +528,17 @@ public final class ReferenceDataFlowRenderer {
         if ("FlowLabel".equals(name)) {
             shape.getFill().setFillForegnd(new ColorValue(required(spec, "background"), 0));
         }
+        textOnShape(shape, value, spec);
+    }
+
+    /** 将文字和字体样式绑定到节点自身，而不是覆盖一个额外文本框。 */
+    private void textOnShape(Shape shape, String value, JsonNode spec) {
         shape.getTextBlock().setLeftMargin(new DoubleValue(0D, 0));
         shape.getTextBlock().setRightMargin(new DoubleValue(0D, 0));
         shape.getTextBlock().setTopMargin(new DoubleValue(0D, 0));
         shape.getTextBlock().setBottomMargin(new DoubleValue(0D, 0));
         shape.getTextBlock().setVerticalAlign(new VerticalAlign(VerticalAlignValue.MIDDLE));
-        shape.getText().getValue().clear();
+        shape.setText(new Text());
         shape.getParas().clear();
         shape.getChars().clear();
         Para para = new Para();
@@ -525,15 +587,13 @@ public final class ReferenceDataFlowRenderer {
                     BasicStroke.JOIN_ROUND));
             for (JsonNode edge : spec.get("edges")) drawPreviewEdge(graphics, edge, spec);
             for (JsonNode node : spec.get("nodes")) drawPreviewNode(graphics, node, spec);
-            JsonNode center = spec.get("captionCenter");
-            centeredText(graphics, required(spec, "caption"), center.get(0).asInt(), center.get(1).asInt(), spec);
         } finally {
             graphics.dispose();
         }
         ImageIO.write(image, "png", target.toFile());
     }
 
-    /** 绘制 PNG 中的无箭头正交数据流。 */
+    /** 绘制 PNG 中与 Visio 一致的无箭头正交数据流。 */
     private void drawPreviewEdge(Graphics2D graphics, JsonNode edge, JsonNode spec) {
         JsonNode points = edge.get("points");
         Path2D path = new Path2D.Double();

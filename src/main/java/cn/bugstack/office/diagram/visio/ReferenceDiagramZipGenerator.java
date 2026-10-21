@@ -22,11 +22,12 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * 批量读取 {@code 功能模块/功能/*.json} ZIP，为每个功能绘制两张固定模板的 Visio 图。
+ * 批量读取 {@code 功能模块/功能/*.json} ZIP，为每个功能绘制数据流图和一张流程图。
  *
- * <p>每个 JSON 使用数据流图与库管理流程图共用的简化结构：
+ * <p>每个 JSON 使用数据流图与流程图共用的简化结构：
  * {@code {"function":"功能3","inputs":["数据1","数据2","数据3"],"persistenceLabel":"持久化"}}。
- * 输出保存在 {@code 输出目录/功能模块/功能/visio/}，其中每张 VSDX 都有同名 PNG 预览。
+ * 默认绘制库管理流程图，也可显式选用标准 Visio 母版流程图。输出保存在
+ * {@code 输出目录/功能模块/功能/visio/}，其中每张 VSDX 都有同名 PNG 预览。
  * 输入 ZIP 仅在内存中读取；所有图绘制成功后才复制到目标目录。</p>
  */
 public final class ReferenceDiagramZipGenerator {
@@ -43,6 +44,8 @@ public final class ReferenceDiagramZipGenerator {
     private final ReferenceDataFlowRenderer dataFlowRenderer = new ReferenceDataFlowRenderer();
     /** 库管理流程图绘制器。 */
     private final ReferenceLibraryFlowRenderer libraryFlowRenderer = new ReferenceLibraryFlowRenderer();
+    /** 基于用户提供的 Visio 母版绘制标准流程图。 */
+    private final StandardFlowRenderer standardFlowRenderer = new StandardFlowRenderer();
 
     /**
      * 从 ZIP 批量生成两种 Visio 图，并按功能目录落盘。
@@ -54,6 +57,25 @@ public final class ReferenceDiagramZipGenerator {
      * @throws IllegalArgumentException ZIP 路径、JSON 内容或功能目录不合法时抛出
      */
     public List<VisioDiagramArtifact> generate(Path zipPath, Path outputRoot) throws IOException {
+        return generate(zipPath, outputRoot, false);
+    }
+
+    /**
+     * 从相同 JSON ZIP 生成数据流图与标准 Visio 母版流程图，不改变原有 {@link #generate} 的输出。
+     *
+     * @param zipPath 包含 {@code 功能模块/功能/*.json} 的 ZIP 文件
+     * @param outputRoot 输出根目录；其下建立 {@code 功能模块/功能/visio}
+     * @return 按 ZIP 顺序排列的产物，每个功能依次为数据流图、标准流程图
+     * @throws IOException ZIP 读取、Visio 绘制或输出文件写入失败时抛出
+     * @throws IllegalArgumentException ZIP 路径、JSON 内容或功能目录不合法时抛出
+     */
+    public List<VisioDiagramArtifact> generateWithStandardFlow(Path zipPath, Path outputRoot) throws IOException {
+        return generate(zipPath, outputRoot, true);
+    }
+
+    /** 共享输入校验、暂存和发布过程，仅切换第二张流程图的绘制器。 */
+    private List<VisioDiagramArtifact> generate(Path zipPath, Path outputRoot,
+                                                boolean standardFlow) throws IOException {
         Objects.requireNonNull(zipPath, "zipPath must not be null");
         Objects.requireNonNull(outputRoot, "outputRoot must not be null");
         List<FeatureInput> features = readFeatures(zipPath);
@@ -70,8 +92,11 @@ public final class ReferenceDiagramZipGenerator {
                 try {
                     VisioDiagramArtifact dataFlow = dataFlowRenderer.render(input,
                             stagedDirectory.resolve(feature.function + "-数据流图.vsdx"));
-                    VisioDiagramArtifact libraryFlow = libraryFlowRenderer.render(input,
-                            stagedDirectory.resolve(feature.function + "-库管理流程图.vsdx"));
+                    VisioDiagramArtifact libraryFlow = standardFlow
+                            ? standardFlowRenderer.render(input,
+                                    stagedDirectory.resolve(feature.function + "-标准流程图.vsdx"))
+                            : libraryFlowRenderer.render(input,
+                                    stagedDirectory.resolve(feature.function + "-库管理流程图.vsdx"));
                     pending.add(new PendingArtifact(dataFlow, targetDirectory));
                     pending.add(new PendingArtifact(libraryFlow, targetDirectory));
                 } catch (Exception exception) {
@@ -150,8 +175,8 @@ public final class ReferenceDiagramZipGenerator {
         if (root == null || !root.isObject()
                 || root.size() != (root.has("persistenceLabel") ? 3 : 2) || function == null
                 || !function.isTextual() || !directoryFunction.equals(function.asText().trim())
-                || inputs == null || !inputs.isArray() || inputs.size() < 3 || inputs.size() > 4) {
-            throw new IllegalArgumentException("JSON 必须包含与目录同名的 function 及 3～4 个 inputs：" + sourcePath);
+                || inputs == null || !inputs.isArray() || inputs.isEmpty()) {
+            throw new IllegalArgumentException("JSON 必须包含与目录同名的 function 及至少一个 input：" + sourcePath);
         }
         JsonNode persistenceLabel = root.get("persistenceLabel");
         if (persistenceLabel != null && (!persistenceLabel.isTextual()

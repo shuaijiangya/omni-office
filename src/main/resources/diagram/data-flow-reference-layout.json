@@ -8,8 +8,6 @@
   "fontSize": 12,
   "accentTop": "#8B2727",
   "accentBottom": "#F2F2F2",
-  "caption": "图 5-3 功能1数据流图",
-  "captionCenter": [750, 744],
   "nodes": [
     {"id": "data1", "kind": "DOCUMENT", "label": "数据1", "x": 100, "y": 40, "width": 265, "height": 116},
     {"id": "data2", "kind": "DOCUMENT", "label": "数据2", "x": 110, "y": 348, "width": 260, "height": 114},

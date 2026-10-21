@@ -1170,7 +1170,7 @@ Windows 请把 classpath 中的 `:` 替换为 `;`。
 └── 库管理模块/功能4/config.json
 ```
 
-JSON 填写功能名和 3～4 个数据名，`function` 必须与所在功能目录同名。
+JSON 填写功能名和至少一个数据名，`inputs` 数量不再固定；`function` 必须与所在功能目录同名。
 可选的 `persistenceLabel` 控制数据流图中通往数据库的连线文字；省略时默认“持久化”，
 填空字符串时不显示文字。库管理流程图接受此字段但不显示它：
 
@@ -1187,6 +1187,67 @@ List<VisioDiagramArtifact> diagrams = new ReferenceDiagramZipGenerator()
 可编辑 VSDX 及对应 PNG 预览。调用前需导入 `ReferenceDiagramZipGenerator`、`VisioDiagramArtifact`、
 `Path` 和 `List`。可运行 `ReferenceDiagramZipGeneratorTest` 查看双功能 ZIP 示例；测试产物位于
 `target/reference-diagram-zip-example/`。
+数据流图的数据节点按输入顺序在左侧纵向排列，按数量自动扩高画布；
+库管理流程图的中间数据节点始终从左到右单排排列，按数量自动扩宽画布。
+流程图每一对相邻节点使用独立的直角路线：每条路线在 VSDX 中都是单个 Visio 一维连接线，
+末段使用原生箭头，首末段分别胶合到节点；不再共用分支母线或汇入线，也不以图形模拟箭头。
+数据流图仍保持无箭头连线。
+“增删改查”共用一条外框，每条内部隔线只绘制一次；各数据节点从独立位置进入操作区，
+操作区到结束节点的箭头沿中心轴对齐。
+图中节点文字直接属于对应的 Visio 节点，不另建覆盖节点的文本框，也不绘制可选中的整页背景形状。
+Word 成品必须使用 `editableVisio(vsdxPath, previewPngPath, width, height)` 嵌入 VSDX OLE 对象，
+不能将 PNG 当作最终图形。PNG 只负责对象在 Word 页面中的预览显示；VSDX 随 DOCX 一起保存，
+无需依赖生成时的外部文件路径。可运行 `ReferenceEditableVisioWordExampleTest`，在
+`target/reference-editable-visio-word-example/` 查看包含两张可编辑 Visio 对象的 DOCX 和原始 VSDX。
+双输入测试还会在 `target/reference-editable-visio-word-example-two-inputs/` 生成与截图结构对应的
+DOCX 和 VSDX；`ReferenceLibraryFlowRendererTest` 会另外输出真实 VSDX 渲染的 PNG 用于对照。
+`ReferenceEditableVisioWordMultiSampleTest` 用 1、2、3、4、9 个输入分别生成两张 VSDX 和一份 Word，
+回读 VSDX、验证 VSDX/DOCX 各压缩条目的 CRC，并确认 Word 中两张非链接 Visio OLE 对象
+包含完整原始 VSDX 字节，预览等比例且每张图独占一页；同时回读渲染每份 VSDX 供外观对照。测试产物位于
+`target/reference-editable-visio-multi-sample/`。生产环境建议通过 `editableVisio` 嵌入，
+不要把剪贴板粘贴出来的位图当成可编辑 Visio。9 个输入保持单排时，在普通 Word 页宽内会明显缩小；
+如需直接阅读节点文字，应使用更大的页面或调整图形布局。桌面版 Word/Visio 的人工复制粘贴行为
+仍需在目标 Windows/Office 环境中单独验收：用 Visio 打开 VSDX，复制图形，在 Word 中选择
+“选择性粘贴 → Microsoft Visio 绘图对象”，保存并重新打开 DOCX，再双击该对象确认节点和箭头可编辑。
+在 Word 中选中对象时显示的虚线框只是选择边界，不会打印。桌面版 Word 与 Visio 的双击编辑
+行为仍需在装有 Visio 的 Windows Office 环境中验收。
+
+如果需要用户提供的标准流程图样式（“菜单栏 → 功能 → 数据项 → 增删改查 → 结束”），可使用
+`StandardFlowRenderer`。它以去标识化的 Visio 原生母版为基础，保留“开始/结束”“流程”
+和“动态连接线”母版；每一条功能到数据、数据到增删改查的关系都是单个带原生箭头的动态连接器，
+而不是几条普通线段的组合。普通节点按 12 磅文字长度调整宽高；四格“增删改查”
+保持参考截图近似正方形的固定宽高，不随功能名伸缩。
+JSON 只需提供功能名和任意数量的数据项：
+
+```json
+{
+  "function": "功能3",
+  "inputs": ["数据1", "数据2", "数据3", "数据4"]
+}
+```
+
+读取 JSON 文件生成可编辑 VSDX 和 PNG 预览：
+
+```java
+VisioDiagramArtifact standardFlow = new StandardFlowRenderer().render(
+        Path.of("src/test/resources/diagram/data-flow-function3.json"),
+        Path.of("target/standard-flow-template-example/功能3-双数据标准流程图.vsdx"));
+```
+
+批量 ZIP 也可显式选择这套标准流程图，同时继续生成数据流图：
+
+```java
+List<VisioDiagramArtifact> diagrams = new ReferenceDiagramZipGenerator()
+        .generateWithStandardFlow(Path.of("功能图输入.zip"), Path.of("生成结果"));
+```
+
+每个功能输出 `功能名-数据流图.vsdx`、`功能名-标准流程图.vsdx` 及各自同名 PNG 预览，
+目录仍为 `生成结果/功能模块/功能/visio/`。原 `generate(...)` 入口继续输出旧版
+“库管理流程图”，不会被隐式替换。运行 `ReferenceDiagramZipGeneratorTest` 可查看
+`target/reference-diagram-zip-standard-example/` 中的双功能 ZIP 示例。
+
+执行 `StandardFlowRendererTest` 可生成单、双、四、九数据及长名称示例。业务内容仍沿用原“库管理流程图”
+的菜单栏、功能、数据项、增删改查、结束结构；这里仅改用标准图形与原生动态连接线。
 
 ## 自定义报告模块
 

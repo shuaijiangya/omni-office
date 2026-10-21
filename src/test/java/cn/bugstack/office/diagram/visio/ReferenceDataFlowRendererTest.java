@@ -85,7 +85,7 @@ class ReferenceDataFlowRendererTest {
             assertTrue(labels.contains("功能1"));
             assertTrue(labels.contains("数据库"));
             assertTrue(labels.contains("持久化"));
-            assertTrue(labels.contains("图 5-3 功能1数据流图"));
+            assertFalse(labels.contains("图 5-3 功能1数据流图"));
             assertTrue(documentOutline);
             assertTrue(gradientSquare);
         } finally {
@@ -111,7 +111,7 @@ class ReferenceDataFlowRendererTest {
                 labels.add(loaded.getPages().getPage(0).getShapes().get(index).getPureText());
             }
             assertTrue(labels.contains("功能3"));
-            assertTrue(labels.contains("图 5-3 功能3数据流图"));
+            assertFalse(labels.contains("图 5-3 功能3数据流图"));
             assertTrue(labels.contains("持久化"));
             assertTrue(labels.contains("数据库"));
         } finally {
@@ -176,7 +176,7 @@ class ReferenceDataFlowRendererTest {
             assertTrue(labels.contains("成果汇总"));
             assertTrue(labels.contains("数据库"));
             assertTrue(labels.contains("持久化"));
-            assertTrue(labels.contains("图 5-3 成果汇总数据流图"));
+            assertFalse(labels.contains("图 5-3 成果汇总数据流图"));
         } finally {
             loaded.dispose();
         }

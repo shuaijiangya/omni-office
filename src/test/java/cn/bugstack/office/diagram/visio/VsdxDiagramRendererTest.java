@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -67,6 +68,34 @@ class VsdxDiagramRendererTest {
         try {
             assertTrue(loaded.getPages().getPage(0).getShapes().getCount() >= 8);
             assertTrue(hasSmallFourCenteredText(loaded));
+            assertFalse(containsPureText(loaded, "可编辑流程图"));
+        } finally {
+            loaded.dispose();
+        }
+    }
+
+    /**
+     * 验证标题为空时仍可生成 Visio，且不会写入额外的图内标题 Shape。
+     *
+     * @throws Exception 当生成或读取 VSDX 失败时抛出
+     */
+    @Test
+    void shouldAllowBlankTitleWithoutAddingTitleShape() throws Exception {
+        DiagramDefinition definition = DiagramDefinition.builder(DiagramType.FLOW, null)
+                .node(new DiagramNode("start", "开始", DiagramNodeType.START))
+                .build();
+        assertEquals("", definition.getTitle());
+        VisioDiagramArtifact artifact = new VsdxDiagramRenderer()
+                .render(definition, temporaryDirectory.resolve("untitled-flow.vsdx"));
+        Diagram loaded = new Diagram(artifact.getVsdxPath().toString());
+        try {
+            assertTrue(containsPureText(loaded, "开始"));
+            for (int index = 0; index < loaded.getPages().getPage(0).getShapes().getCount(); index++) {
+                String text = loaded.getPages().getPage(0).getShapes().get(index).getPureText();
+                if (!text.isEmpty()) {
+                    assertEquals("开始", text);
+                }
+            }
         } finally {
             loaded.dispose();
         }

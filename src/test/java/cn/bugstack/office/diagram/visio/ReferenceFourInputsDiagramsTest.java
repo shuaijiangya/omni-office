@@ -2,6 +2,7 @@ package cn.bugstack.office.diagram.visio;
 
 import cn.bugstack.office.diagram.api.VisioDiagramArtifact;
 import com.aspose.diagram.Diagram;
+import com.aspose.diagram.SaveFileFormat;
 import com.aspose.diagram.Shape;
 import org.junit.jupiter.api.Test;
 
@@ -40,11 +41,11 @@ class ReferenceFourInputsDiagramsTest {
         VisioDiagramArtifact libraryFlow = new ReferenceLibraryFlowRenderer()
                 .render(INPUT, OUTPUT.resolve("功能3-四数据输入库管理流程图.vsdx"));
 
-        assertPreview(dataFlow, 1500, 1000);
+        assertPreview(dataFlow, 1500, 836);
         assertPreview(libraryFlow, 1500, 1150);
         assertDiagram(dataFlow, "Flow_data4_function_", "数据库", "持久化");
         assertDiagram(libraryFlow, "LibraryLine_Data4ToOperations_", "菜单栏", "结束");
-        assertSingleOperationsEntry(libraryFlow);
+        assertIndependentOperationsEntries(libraryFlow);
     }
 
     /** 验证输出文件存在且预览画布没有裁剪。 */
@@ -61,6 +62,8 @@ class ReferenceFourInputsDiagramsTest {
             throws Exception {
         Diagram loaded = new Diagram(artifact.getVsdxPath().toString());
         try {
+            loaded.save(artifact.getVsdxPath().resolveSibling(
+                    artifact.getVsdxPath().getFileName() + ".visio.png").toString(), SaveFileFormat.PNG);
             Set<String> labels = new HashSet<>();
             boolean hasFourthEdge = false;
             for (int index = 0; index < loaded.getPages().getPage(0).getShapes().getCount(); index++) {
@@ -84,19 +87,21 @@ class ReferenceFourInputsDiagramsTest {
         }
     }
 
-    /** 四个数据节点共用一个进入“增删改查”的箭头。 */
-    private void assertSingleOperationsEntry(VisioDiagramArtifact artifact) throws Exception {
+    /** 四个数据节点各用一根直角连接线与独立箭头进入“增删改查”。 */
+    private void assertIndependentOperationsEntries(VisioDiagramArtifact artifact) throws Exception {
         Diagram loaded = new Diagram(artifact.getVsdxPath().toString());
         try {
-            int sharedArrowSegments = 0;
-            int individualArrowSegments = 0;
+            int individualNativeArrows = 0;
             for (int index = 0; index < loaded.getPages().getPage(0).getShapes().getCount(); index++) {
-                String name = loaded.getPages().getPage(0).getShapes().get(index).getNameU();
-                if (name.startsWith("LibraryLine_CollectorToOperationsArrow_")) sharedArrowSegments++;
-                if (name.matches("LibraryLine_Data[1-4]ToOperationsArrow_.*")) individualArrowSegments++;
+                Shape shape = loaded.getPages().getPage(0).getShapes().get(index);
+                String name = shape.getNameU();
+                if (name.matches("LibraryLine_Data[1-4]ToOperations_.*")
+                        && (shape.getLine().getBeginArrow().getValue() == 4
+                        || shape.getLine().getEndArrow().getValue() == 4)) individualNativeArrows++;
+                assertTrue(!name.contains("Collector") && !name.contains("Trunk"),
+                        "flowchart must not contain a shared bus");
             }
-            assertEquals(2, sharedArrowSegments);
-            assertEquals(0, individualArrowSegments);
+            assertEquals(4, individualNativeArrows);
         } finally {
             loaded.dispose();
         }
