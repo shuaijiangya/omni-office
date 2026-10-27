@@ -139,7 +139,7 @@
                         <goals><goal>enforce</goal></goals>
                         <configuration>
                             <rules>
-                                <requireJavaVersion><version>[17,)</version></requireJavaVersion>
+                                <requireJavaVersion><version>[11,)</version></requireJavaVersion>
                                 <requireMavenVersion><version>[3.6.3,)</version></requireMavenVersion>
                             </rules>
                         </configuration>

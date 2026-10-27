@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1.0",
+  "templateId": "system-assessment",
+  "version": "1.0",
+  "title": "系统评估报告",
+  "styleProfile": "DEFAULT",
+  "tableOfContentsDepth": 2,
+  "sections": [
+    {
+      "id": "overview",
+      "level": 1,
+      "title": "评估概述",
+      "prompt": "根据项目名称、评估对象与评估日期，写一段客观的评估范围说明。",
+      "dataRefs": ["/project"],
+      "allowedBlocks": ["paragraph"],
+      "maxChars": 300
+    },
+    {
+      "id": "modules",
+      "level": 1,
+      "title": "模块评估",
+      "mode": "HEADING_ONLY"
+    },
+    {
+      "id": "module",
+      "level": 2,
+      "title": "{{item.name}}",
+      "repeatOn": "/modules",
+      "itemKey": "id",
+      "prompt": "按业务事实写模块职责、已有证据和风险。风险字段只陈述原文所述的待验证事项，不推断故障后果、性能指标或已发生的问题。",
+      "dataRefs": ["$item"],
+      "allowedBlocks": ["paragraph"],
+      "maxChars": 800
+    },
+    {
+      "id": "module-summary",
+      "level": 1,
+      "title": "模块评估汇总",
+      "prompt": "仅生成一张表格，表头固定为模块、职责、已有证据、待验证风险。modules 中每个对象严格对应表格的一行，按数组原顺序填写，不新增模块或事实。",
+      "dataRefs": ["/modules"],
+      "allowedBlocks": ["table"],
+      "requiredBlocks": ["table"],
+      "maxChars": 1000
+    },
+    {
+      "id": "conclusion",
+      "level": 1,
+      "title": "评估结论",
+      "prompt": "只根据结论和待办事项，给出结论与后续动作。",
+      "dataRefs": ["/conclusion"],
+      "allowedBlocks": ["paragraph"],
+      "maxChars": 500
+    }
+  ]
+}

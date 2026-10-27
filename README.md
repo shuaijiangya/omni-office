@@ -17,6 +17,9 @@ DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 
 >
 > 按原始 CSCI 详细设计模板、Java 源码 ZIP 和可选 DDL 生成完整文档，请查看
 > **[CSCI 源码驱动详细设计](docs/csci-source-driven-design.md)**。
+>
+> 按预设标题层级和逐标题提示词，结合业务 JSON 生成报告，请查看
+> **[结构化标题模板＋逐标题 AI 填充](docs/structured-report-ai.md)**。
 
 ## 核心特性
 
@@ -38,6 +41,7 @@ DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 
 - 提供模块计划、条件判断、依赖校验、语义文档校验和阶段化异常信息。
 - 提供版本化 `DocumentSpec`、`DiagramSpec` 和 `DocumentTemplate` 协议及 JSON Schema。
 - 支持内部 AI 自由生成 DocumentSpec，或只填充模板业务数据；两种模式边界独立。
+- 支持从一段自然语言生成、人工编辑或按修改要求重写结构化标题模板 JSON，再逐标题 AI 填充：标题和层级由模板确定，按 `dataRefs` 限定每次输入，支持循环生成模块标题并导出 Word。
 - Function Calling、MCP stdio 与 MCP Streamable HTTP 复用同一个外部工具业务门面。
 - 支持 API Key/JWT、Origin、会话、限流、多租户、受控下载、审计及异步 MCP Tasks。
 - 支持模板审核发布、Schema 兼容迁移、AI 评测/人工审批和产物安全生命周期。
@@ -68,7 +72,7 @@ DocumentSpec、DiagramSpec、工件目录和统一 export 的校验。
 
 | 技术 | 版本/用途 |
 | --- | --- |
-| Java | 源码兼容级别为 Java 11；由于当前 Aspose Words 使用 `jdk17` classifier，运行时推荐 JDK 17 或更高版本 |
+| Java | 源码与运行基线为 Java 11；编译使用 `--release 11`，本机 JDK 11 已验证主要生成链路 |
 | Maven | 项目构建、依赖描述和测试执行 |
 | Aspose Words for Java | DOCX 创建、Word 域、目录、页眉页脚、分节和 PDF 转换 |
 | Aspose Diagram for Java | VSDX 图形生成与编辑 |
@@ -180,7 +184,7 @@ Section 3 的首个正文元素及其样式由第一个业务模块决定，框�
 
 ### 前置要求
 
-- JDK 17 或更高版本。
+- JDK 11 或更高版本。
 - Maven 3.6.3 或更高版本。
 - Aspose Words 26.6 和 Aspose Diagram 26.6 对应 JAR。
 

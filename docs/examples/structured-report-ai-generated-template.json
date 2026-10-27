@@ -1,0 +1,50 @@
+{
+  "schemaVersion" : "1.0",
+  "templateId" : "shared-text-assessment",
+  "version" : "1.0",
+  "title" : "共享业务文本评估报告",
+  "sections" : [ {
+    "id" : "heading-1",
+    "level" : 1,
+    "title" : "项目概述",
+    "mode" : "HEADING_ONLY"
+  }, {
+    "id" : "heading-4",
+    "level" : 2,
+    "title" : "项目背景",
+    "mode" : "AI_WRITE",
+    "prompt" : "从同一段业务文字中提取项目名称、版本和评估日期，以段落形式呈现。",
+    "dataRefs" : [ "/content" ],
+    "allowedBlocks" : [ "paragraph" ]
+  }, {
+    "id" : "heading-2",
+    "level" : 1,
+    "title" : "功能验证",
+    "mode" : "HEADING_ONLY"
+  }, {
+    "id" : "heading-5",
+    "level" : 2,
+    "title" : "验证结果",
+    "mode" : "AI_WRITE",
+    "prompt" : "从同一段业务文字中提取功能检查记录。若为一条记录，使用段落；若为多条记录，使用表格。表头需包含：检查项、结果、依据。不得新增检查结果。",
+    "dataRefs" : [ "/content" ],
+    "allowedBlocks" : [ "paragraph", "table" ]
+  }, {
+    "id" : "heading-6",
+    "level" : 2,
+    "title" : "风险与建议",
+    "mode" : "AI_WRITE",
+    "prompt" : "从同一段业务文字中提取明确标出的风险和建议，以段落形式呈现。",
+    "dataRefs" : [ "/content" ],
+    "allowedBlocks" : [ "paragraph" ]
+  }, {
+    "id" : "heading-3",
+    "level" : 1,
+    "title" : "评估结论",
+    "mode" : "AI_WRITE",
+    "prompt" : "请提取明确标出的结论，以段落形式呈现。",
+    "dataRefs" : [ "/content" ],
+    "allowedBlocks" : [ "paragraph" ]
+  } ],
+  "tableOfContentsDepth" : 2
+}

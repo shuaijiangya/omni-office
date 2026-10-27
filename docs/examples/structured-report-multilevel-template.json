@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1.0",
+  "templateId": "multilevel-quality-assessment",
+  "version": "1.0",
+  "title": "多级质量评估报告",
+  "styleProfile": "DEFAULT",
+  "tableOfContentsDepth": 3,
+  "sections": [
+    {
+      "id": "overview",
+      "level": 1,
+      "title": "项目概述",
+      "mode": "HEADING_ONLY"
+    },
+    {
+      "id": "background",
+      "level": 2,
+      "title": "评估背景",
+      "prompt": "根据项目名称、版本和评估日期写一段简短背景，不添加业务数据以外的事实。",
+      "dataRefs": ["/project"],
+      "allowedBlocks": ["paragraph"],
+      "maxChars": 300
+    },
+    {
+      "id": "quality",
+      "level": 1,
+      "title": "质量评估",
+      "mode": "HEADING_ONLY"
+    },
+    {
+      "id": "functional",
+      "level": 2,
+      "title": "功能质量",
+      "mode": "HEADING_ONLY"
+    },
+    {
+      "id": "function-evidence",
+      "level": 3,
+      "title": "功能验证结果",
+      "prompt": "先统计 facts 中 /checks 数组的元素个数，再选择正文块类型。只有 1 条记录时，blocks 仅包含 1 个 paragraph，写明检查项、结果和依据。有 2 条及以上记录时，blocks 仅包含 1 个 table，绝对不要返回 paragraph；table.headers 必须依次为检查项、结果、依据，table.rows 每条记录各占一行，按原顺序填写。当前数据若有多条记录，段落形式视为错误。不要新增检查项或编造结果。",
+      "dataRefs": ["/checks"],
+      "allowedBlocks": ["table", "paragraph"],
+      "maxChars": 1200
+    },
+    {
+      "id": "risks",
+      "level": 2,
+      "title": "风险与建议",
+      "prompt": "facts 中的 /riskAdvice 对象已经包含 risk 和 advice 两个字段，数据充分。用这两个字段写 1 个 paragraph，分别说明风险与建议；不要返回 NEEDS_INPUT，不推断其他影响或完成时间。",
+      "dataRefs": ["/riskAdvice"],
+      "allowedBlocks": ["paragraph"],
+      "maxChars": 300
+    },
+    {
+      "id": "conclusion",
+      "level": 1,
+      "title": "评估结论",
+      "prompt": "只根据结论事实写一段总结，不新增结论。",
+      "dataRefs": ["/conclusion"],
+      "allowedBlocks": ["paragraph"],
+      "maxChars": 300
+    }
+  ]
+}

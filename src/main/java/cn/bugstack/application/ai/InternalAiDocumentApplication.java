@@ -5,11 +5,15 @@ import cn.bugstack.application.document.DocumentGenerationApplication;
 import cn.bugstack.application.document.DocumentSpecLimits;
 import cn.bugstack.application.document.DocumentSpecValidator;
 import cn.bugstack.application.document.DynamicDocumentExporter;
+import cn.bugstack.application.ai.report.StructuredReportAiApplication;
+import cn.bugstack.application.ai.report.StructuredReportTemplateAiApplication;
 import cn.bugstack.application.template.DocumentTemplateApplication;
 import cn.bugstack.application.template.DocumentTemplateDescriptor;
 import cn.bugstack.export.api.ReportOutputFormat;
 import cn.bugstack.protocol.template.DocumentTemplateSpec;
+import cn.bugstack.protocol.document.DocumentSpec;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -22,6 +26,8 @@ public final class InternalAiDocumentApplication implements InternalAiDocumentSe
 
     private final DocumentTemplateApplication templates;
     private final InternalAiDocumentService service;
+    private final StructuredReportAiApplication structuredReports;
+    private final StructuredReportTemplateAiApplication structuredReportTemplates;
 
     /** 创建不允许自由 AI 生成图工件的应用。 */
     public InternalAiDocumentApplication(StructuredAiClient aiClient) {
@@ -44,6 +50,9 @@ public final class InternalAiDocumentApplication implements InternalAiDocumentSe
         this.templates = new DocumentTemplateApplication(documentExporter);
         this.service = new DefaultInternalAiDocumentService(aiClient, documentValidator,
                 templates, documentExporter);
+        this.structuredReports = new StructuredReportAiApplication(aiClient, AiGenerationPolicy.defaults(),
+                documentValidator, documentExporter);
+        this.structuredReportTemplates = new StructuredReportTemplateAiApplication(aiClient);
     }
 
     public void registerTemplate(DocumentTemplateSpec template) {
@@ -83,6 +92,26 @@ public final class InternalAiDocumentApplication implements InternalAiDocumentSe
 
     public AiDocumentResult generateFromTemplate(String templateId, String version, String instruction) {
         return generateFromTemplate(templateId, version, instruction, null);
+    }
+
+    /** 按结构化标题模板逐标题填充，返回可继续审核或导出的 DocumentSpec。 */
+    public DocumentSpec generateStructuredReport(JsonNode template, JsonNode businessData) {
+        return structuredReports.generate(template, businessData);
+    }
+
+    /** 按结构化标题模板逐标题填充，并使用当前导出器写入 Word。 */
+    public void generateStructuredReportDocx(JsonNode template, JsonNode businessData, Path outputPath) {
+        structuredReports.generateDocx(template, businessData, outputPath);
+    }
+
+    /** 根据一段自然语言生成可编辑的共享文本报告模板。 */
+    public ObjectNode generateStructuredReportTemplate(String text, String templateId) {
+        return structuredReportTemplates.generate(text, templateId);
+    }
+
+    /** 根据修改要求返回新模板；不修改原模板。 */
+    public ObjectNode reviseStructuredReportTemplate(JsonNode template, String changeRequest) {
+        return structuredReportTemplates.revise(template, changeRequest);
     }
 
     @Override
