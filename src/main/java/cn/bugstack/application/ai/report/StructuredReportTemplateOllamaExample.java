@@ -1,6 +1,7 @@
 package cn.bugstack.application.ai.report;
 
 import cn.bugstack.application.ai.AiGenerationPolicy;
+import cn.bugstack.application.ai.StructuredAiClient;
 import cn.bugstack.application.ai.ollama.OllamaStructuredAiClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,8 +27,17 @@ public final class StructuredReportTemplateOllamaExample {
                     + " | revise <existing.json> <changes.txt> <output.json> [model]");
         }
         String model = args.length == 5 ? args[4] : "qwen3.5:2b";
+        StructuredAiClient client = new OllamaStructuredAiClient(model);
+        if (Boolean.getBoolean("omni.ai.debug")) {
+            StructuredAiClient delegate = client;
+            client = request -> {
+                String response = delegate.generateJson(request);
+                System.err.println("AI template attempt " + request.getAttempt() + ": " + response);
+                return response;
+            };
+        }
         StructuredReportTemplateAiApplication app = new StructuredReportTemplateAiApplication(
-                new OllamaStructuredAiClient(model), new AiGenerationPolicy(4, 20_000, 100_000, 2_000_000));
+                client, new AiGenerationPolicy(4, 20_000, 100_000, 2_000_000));
         final JsonNode template;
         final Path output;
         if ("generate".equals(args[0])) {

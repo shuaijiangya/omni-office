@@ -143,7 +143,7 @@ env JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-11.0.17.jdk/Contents/Home \
 
 ### 从一段文字自动生成可编辑的模板
 
-如果连标题模板也不想手写，可用 `StructuredReportTemplateAiApplication` 先让模型根据一段业务文字或报告需求拟定模板。输出是与[共享文字模板](examples/structured-report-shared-text-template.json)同结构的普通 JSON，保存后可直接人工修改；`validate(...)` 可在导出前检查标题层级、类型和引用。所有自动生成的 `AI_WRITE` 标题都只引用 `/content`，因此同一段业务文字可以用于后续逐标题填充。
+如果连标题模板也不想手写，可用 `StructuredReportTemplateAiApplication` 让模型根据一段业务文字或报告需求直接填写标准 JSON 格式。这里的“模板”只定义 JSON 字段与结构，不提供固定标题内容，也不用于比对输入文字的章节是否齐全。生成阶段仅检查返回值是否符合该 JSON 格式；如需在导出前检查标题层级、类型和业务引用，可另行调用 `validate(...)`。所有自动生成的 `AI_WRITE` 标题都只引用 `/content`，因此同一段业务文字可以用于后续逐标题填充。
 
 ```java
 String text = "项目：智能体训练软件；功能检查包含任务创建和任务查询；"
@@ -173,7 +173,9 @@ new StructuredReportAiApplication(client).generateDocx(
 
 命令行示例 `StructuredReportTemplateOllamaExample` 支持 `generate <text.txt> <templateId> <output.json> [model]` 和 `revise <existing.json> <changes.txt> <output.json> [model]`；生成或修改后的 JSON 可直接传给 `StructuredReportOllamaExample`。统一门面 `InternalAiDocumentApplication` 也提供 `generateStructuredReportTemplate(...)` 和 `reviseStructuredReportTemplate(...)`。
 
-可直接查看本地 `qwen3.5:2b` 根据[输入文字](examples/structured-report-template-request.txt)生成的[可编辑模板 JSON](examples/structured-report-ai-generated-template.json)。输入如明确写出“一级标题依次为……”“某一级标题下设‘……’”以及“父标题不写正文”，生成器会核对这些标题和层级，整理父子顺序并清除父标题的正文配置；没有明确写出结构时，则由模型拟定标题，仍会执行基本结构校验。模型生成的 `prompt` 是否准确体现业务意图，仍需人工检查。
+可参考[输入文字](examples/structured-report-template-request.txt)和对应的[标准模板 JSON 示例](examples/structured-report-ai-generated-template.json)。输入文字不必使用固定句式；整段文字直接发送给模型，模型决定标题、层级、顺序和每节填充提示词。给模型的需求至少应包含报告主题或业务重点；只写“生成报告标题模板”无法让模型推断具体章节，更不能据此断言一定出现“项目概述”。`id` 使用唯一的小写英文连字符机器键，`title` 是展示标题；正文 `prompt` 应引用后续可见的 `facts` 中 `/content`，而不是仅在模板设计阶段存在的 `sourceText`。输出 JSON Schema 约束字段、类型、必填项和 `HEADING_ONLY` / `AI_WRITE` 的不同形态；格式错误或重复 `id` 会要求模型重试，不会自动改写标题或正文配置。生成阶段不检查原文提到的每个章节是否都已生成，因此只有一个合规章节也可能通过。小参数模型仍可能漏掉子标题或误设父标题模式；生成的标题和 `prompt` 仍需人工检查。
+
+真实 Ollama 层级质量测试可在本地显式启用：`-Domni.ai.ollama.integration=true -Dtest=StructuredReportTemplateAiApplicationTest#ollamaFollowsExplicitHierarchyWhenEnabled test`。它会核对示例要求的全部标题、层级、父标题模式、唯一 `id` 和表格能力；普通单元测试不依赖本地 Ollama 服务。
 
 ### 模型内部响应（调用方无需准备）
 
