@@ -502,13 +502,19 @@ src/main/resources/internal-ai/1.0/capabilities.json
 
 ### 使用本地 Ollama 生成演示文档
 
-`OllamaStructuredAiClient` 默认调用 `http://127.0.0.1:11434/api/chat`，通过 Ollama 的
-`format` 字段提交输出 JSON Schema，并关闭流式输出和思考文本。先确认本地模型可用：
+`OllamaStructuredAiClient` 默认调用 `http://127.0.0.1:11434/v1/chat/completions`，
+使用标准 OpenAI Chat Completions 协议；已有 `/api/chat` 自定义地址会自动转换到兼容端点。
+Ollama 请求使用标准的 `response_format: json_schema` 和 `reasoning_effort: none`；通用
+OpenAI 兼容客户端默认使用 `json_object`，如模型支持，也可以选择 `JSON_SCHEMA` 模式。
+两种模式后续都由本地 Schema 校验及重试保证业务结构。先确认本地模型可用：
 
 ```bash
 ollama list
 ollama run qwen3.5:2b
 ```
+
+真实模型对自然语言章节要求的遵循程度与协议兼容是两项独立检查。常规测试使用本地 HTTP 假服务验证协议；
+如需运行真实 Ollama 的严格目录生成测试，可设置 `OMNI_OFFICE_RUN_OLLAMA_LIVE_TESTS=true`。
 
 编译并生成 Word 与 HTML 演示文档：
 
@@ -797,7 +803,12 @@ M11 第一阶段在现有 MCP HTTP 服务中增加独立 REST 契约。普通业
 内部 AI 也复用同一 Generation Job：`AI_FREEFORM` 先生成并校验 DocumentSpec，`AI_TEMPLATE` 只让模型填充
 指定模板版本的数据；随后仍由确定性的模板/DocumentSpec/export 链生成工件。设置
 `OMNI_OFFICE_OLLAMA_MODEL=qwen3.5:2b` 即可启用本地 Ollama，可用
-`OMNI_OFFICE_OLLAMA_CHAT_ENDPOINT` 覆盖 `/api/chat` 地址。AI 模式必须同时具备 `generation:create` 和
+`OMNI_OFFICE_OLLAMA_CHAT_ENDPOINT` 覆盖 `/v1/chat/completions` 地址（旧 `/api/chat` 配置仍兼容）。
+如使用标准 OpenAI 或其他 OpenAI 兼容服务，设置 `OMNI_OFFICE_OPENAI_MODEL`、
+`OMNI_OFFICE_OPENAI_API_KEY`，可选 `OMNI_OFFICE_OPENAI_BASE_URL`（`/v1` base URL 或完整
+`/chat/completions` 地址）；本地无需鉴权的兼容服务可不设置 API Key。两组模型变量不能同时配置。
+也可以在 Java 中直接创建 `new OpenAiCompatibleStructuredAiClient(model, apiKey)`，或通过完整构造方法
+指定兼容端点、超时和温度。接入远程服务时应使用可信的 HTTPS 端点。AI 模式必须同时具备 `generation:create` 和
 `ai:generate`，默认 API Key 简写不包含 AI 权限。模型调用轨迹只记录输入/上下文/输出摘要和耗时，写入
 `dataRoot/ai/traces.jsonl`。任务到达 `PENDING_REVIEW` 或任一终态后会移除指令、上下文和完整正文，只保留
 模式、格式、模板标识、审核策略等最小运行元数据；上下文仍不应携带未获授权的秘密。

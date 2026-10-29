@@ -18,6 +18,7 @@ import cn.bugstack.application.generation.GenerationQuotaPolicy;
 import cn.bugstack.application.generation.JsonGenerationQuotaPolicy;
 import cn.bugstack.application.ai.StructuredAiClient;
 import cn.bugstack.application.ai.ollama.OllamaStructuredAiClient;
+import cn.bugstack.application.ai.openai.OpenAiCompatibleStructuredAiClient;
 import cn.bugstack.application.ai.observability.JsonLinesAiTraceStore;
 import cn.bugstack.application.ai.observability.TracingStructuredAiClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -216,8 +217,28 @@ public final class McpHttpServerMain {
         return new JsonGenerationQuotaPolicy(path.normalize());
     }
 
-    private static StructuredAiClient internalAiClient(Map<String, String> env, Path dataRoot) {
+    static StructuredAiClient internalAiClient(Map<String, String> env, Path dataRoot) {
+        String openAiModel = blankToNull(env.get("OMNI_OFFICE_OPENAI_MODEL"));
         String model = blankToNull(env.get("OMNI_OFFICE_OLLAMA_MODEL"));
+        if (openAiModel != null && model != null) {
+            throw new IllegalArgumentException("configure only one of OMNI_OFFICE_OPENAI_MODEL and OMNI_OFFICE_OLLAMA_MODEL");
+        }
+        if (openAiModel != null) {
+            String endpoint = blankToNull(env.get("OMNI_OFFICE_OPENAI_BASE_URL"));
+            String apiKey = blankToNull(env.get("OMNI_OFFICE_OPENAI_API_KEY"));
+            if (endpoint == null && apiKey == null) {
+                throw new IllegalArgumentException("OMNI_OFFICE_OPENAI_API_KEY is required for the official OpenAI endpoint");
+            }
+            StructuredAiClient client = new OpenAiCompatibleStructuredAiClient(
+                    endpoint == null ? OpenAiCompatibleStructuredAiClient.OPENAI_ENDPOINT : URI.create(endpoint),
+                    openAiModel, apiKey,
+                    Duration.ofSeconds(integer(env, "OMNI_OFFICE_OPENAI_TIMEOUT_SECONDS", 300)),
+                    decimal(env, "OMNI_OFFICE_OPENAI_TEMPERATURE", 0.1D),
+                    HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
+                    new ObjectMapper());
+            return new TracingStructuredAiClient(client,
+                    new JsonLinesAiTraceStore(dataRoot.resolve("ai/traces.jsonl")), "openai-compatible", openAiModel);
+        }
         if (model == null) return null;
         String endpointValue = blankToNull(env.get("OMNI_OFFICE_OLLAMA_CHAT_ENDPOINT"));
         StructuredAiClient client;

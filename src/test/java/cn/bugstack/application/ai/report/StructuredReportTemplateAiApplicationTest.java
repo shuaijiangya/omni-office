@@ -155,6 +155,8 @@ class StructuredReportTemplateAiApplicationTest {
 
     @Test
     void ollamaFollowsExplicitHierarchyWhenEnabled() throws Exception {
+        Assumptions.assumeTrue("true".equalsIgnoreCase(System.getenv("OMNI_OFFICE_RUN_OLLAMA_LIVE_TESTS")),
+                "live Ollama output is model-dependent; opt in explicitly");
         String description = Files.readString(Path.of("docs/examples/structured-report-template-request.txt"),
                 StandardCharsets.UTF_8);
         StructuredReportTemplateAiApplication app = new StructuredReportTemplateAiApplication(
