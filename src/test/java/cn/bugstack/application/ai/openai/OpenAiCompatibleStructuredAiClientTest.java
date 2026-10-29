@@ -93,6 +93,23 @@ class OpenAiCompatibleStructuredAiClientTest {
     }
 
     @Test
+    void removesOnlyUnsupportedOllamaPatternsWithoutChangingLocalSchema() throws Exception {
+        OllamaStructuredAiClient client = new OllamaStructuredAiClient(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1"),
+                "qwen3.5:2b", Duration.ofSeconds(10), 0.1D, HttpClient.newHttpClient(), mapper);
+        com.fasterxml.jackson.databind.node.ObjectNode schema = mapper.createObjectNode().put("type", "object");
+        schema.putObject("properties").putObject("name")
+                .put("type", "string").put("pattern", ".*\\\\S.*");
+        StructuredAiRequest request = new StructuredAiRequest("test", "Return JSON", "Generate",
+                null, schema, 1, Collections.emptyList());
+
+        assertEquals("{\"ok\":true}", client.generateJson(request));
+        assertFalse(mapper.readTree(requestBody.get()).path("response_format")
+                .path("json_schema").path("schema").path("properties").path("name").has("pattern"));
+        assertTrue(schema.path("properties").path("name").has("pattern"));
+    }
+
+    @Test
     void rejectsProviderFailuresWithoutEchoingResponseOrSecret() {
         responseStatus = 401;
         responseBody = "{\"error\":{\"message\":\"secret provider details\"}}";

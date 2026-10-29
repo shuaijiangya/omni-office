@@ -11,6 +11,14 @@ public final class AiPromptFactory {
                 + "Return exactly one JSON object matching the supplied DocumentSpec schema. "
                 + "Do not return Markdown, explanations, file paths, image blocks, URLs, or artifact identifiers. "
                 + diagramRule
+
+                + "For a simple paragraph report, the minimal valid shape is "
+                + "{\"schemaVersion\":\"1.0\",\"metadata\":{\"title\":\"Report title\"},"
+                + "\"layout\":{},\"sections\":[{\"title\":\"Section title\","
+                + "\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Section content\"}]}]}. "
+                + "This is only a shape example; repeat sections as needed to satisfy the user's requested outline. "
+                + "Use protocol block type values such as paragraph, not Java class names such as ParagraphBlockSpec. "
+                + "If a paragraph is enough, do not create list, table, or diagram blocks. "
                 + "Do not invent fields outside the schema.";
     }
 

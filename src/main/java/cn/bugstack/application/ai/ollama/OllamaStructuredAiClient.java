@@ -4,11 +4,15 @@ import cn.bugstack.application.ai.StructuredAiClient;
 import cn.bugstack.application.ai.StructuredAiRequest;
 import cn.bugstack.application.ai.openai.OpenAiCompatibleStructuredAiClient;
 import cn.bugstack.application.ai.openai.OpenAiCompatibleStructuredAiClient.ResponseFormatMode;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.Iterator;
+import java.util.Map;
 
 /**
  * Ollama 的 OpenAI 兼容协议适配器。
@@ -37,7 +41,34 @@ public final class OllamaStructuredAiClient implements StructuredAiClient {
 
     @Override
     public String generateJson(StructuredAiRequest request) {
-        return delegate.generateJson(request);
+        if (request == null || request.getOutputSchema() == null) {
+            return delegate.generateJson(request);
+        }
+        JsonNode modelSchema = request.getOutputSchema();
+        removeUnsupportedPatterns(modelSchema);
+        return delegate.generateJson(new StructuredAiRequest(request.getOperation(),
+                request.getSystemInstruction(), request.getUserInstruction(), request.getContext(),
+                modelSchema, request.getAttempt(), request.getValidationFeedback()));
+    }
+
+    /** Ollama 的 Schema 转换器只接受首尾锚定的 pattern；本地校验仍使用原始 Schema。 */
+    private static void removeUnsupportedPatterns(JsonNode node) {
+        if (node.isObject()) {
+            ObjectNode object = (ObjectNode) node;
+            JsonNode pattern = object.get("pattern");
+            if (pattern != null && pattern.isTextual()
+                    && (!pattern.asText().startsWith("^") || !pattern.asText().endsWith("$"))) {
+                object.remove("pattern");
+            }
+            Iterator<Map.Entry<String, JsonNode>> fields = object.fields();
+            while (fields.hasNext()) {
+                removeUnsupportedPatterns(fields.next().getValue());
+            }
+        } else if (node.isArray()) {
+            for (JsonNode child : node) {
+                removeUnsupportedPatterns(child);
+            }
+        }
     }
 
     private static URI compatibleEndpoint(URI endpoint) {

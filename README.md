@@ -534,6 +534,21 @@ java -cp "target/classes:$OMNI_OFFICE_CP" \
 DocumentSpec 映射和安全校验，再由统一 export 生成两个格式。输出文件位于 `target/ai-demo/`，不会提交
 到 Git。
 
+如果需要**不提供模板或业务 JSON，只输入一段文字并真实调用 Ollama**，运行
+[`OllamaFreeformReportExampleTest`](src/test/java/cn/bugstack/application/ai/OllamaFreeformReportExampleTest.java)：
+
+```bash
+JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-11.0.17.jdk/Contents/Home \
+  /Users/luojiang/maven/apache-maven-3.6.3/bin/mvn \
+  -Dmaven.repo.local=/Users/luojiang/maven/repository \
+  -Dtest=OllamaFreeformReportExampleTest \
+  -Domni.ai.ollama.integration=true test
+```
+
+测试默认使用 `qwen3.5:2b`，输出 `target/ai-demo/ollama-freeform-report.docx`；可通过
+`-Domni.ai.model=...` 与 `-Domni.ai.output=...` 修改。此测试不模拟 AI，运行前需启动 Ollama 并拉取模型。
+它验证 Word 可打开及样本中的关键数字是否保留，但模型生成内容仍需人工复核事实。
+
 ### 对外提供 Function Calling 与 MCP
 
 外部模型不直接调用内部 AI，也不访问服务器路径。M5 使用
