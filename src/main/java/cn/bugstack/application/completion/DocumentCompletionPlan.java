@@ -12,6 +12,7 @@ public final class DocumentCompletionPlan {
     private final List<TableCompletionPlanningResult> tables;
     private final List<CellPatchPlan> cells;
     private final List<RunPatchPlan> runs;
+    private final List<ChartPatchPlan> charts;
     private final double confidence;
     private final String reason;
     private final List<String> questions;
@@ -36,11 +37,21 @@ public final class DocumentCompletionPlan {
                                   List<TableCompletionPlanningResult> tables, List<CellPatchPlan> cells,
                                   List<RunPatchPlan> runs,
                                   double confidence, String reason, List<String> questions) {
+        this(sourceSha256, paragraphs, tables, cells, runs, Collections.emptyList(),
+                confidence, reason, questions);
+    }
+
+    /** 创建同时包含正文、表格和原生图表补全的文档计划。 */
+    public DocumentCompletionPlan(String sourceSha256, List<ParagraphPatchPlan> paragraphs,
+                                  List<TableCompletionPlanningResult> tables, List<CellPatchPlan> cells,
+                                  List<RunPatchPlan> runs, List<ChartPatchPlan> charts,
+                                  double confidence, String reason, List<String> questions) {
         this.sourceSha256 = sourceSha256;
         this.paragraphs = Collections.unmodifiableList(new ArrayList<>(paragraphs));
         this.tables = Collections.unmodifiableList(new ArrayList<>(tables));
         this.cells = Collections.unmodifiableList(new ArrayList<>(cells));
         this.runs = Collections.unmodifiableList(new ArrayList<>(runs));
+        this.charts = Collections.unmodifiableList(new ArrayList<>(charts));
         this.confidence = confidence;
         this.reason = reason;
         this.questions = Collections.unmodifiableList(new ArrayList<>(questions));
@@ -61,6 +72,9 @@ public final class DocumentCompletionPlan {
     /** @return 按独立 Run 定点替换的操作 */
     public List<RunPatchPlan> getRuns() { return runs; }
 
+    /** @return 在指定源段落后插入的可编辑 Word 图表 */
+    public List<ChartPatchPlan> getCharts() { return charts; }
+
     /** @return 模型置信度 */
     public double getConfidence() { return confidence; }
 
@@ -73,6 +87,6 @@ public final class DocumentCompletionPlan {
     /** @return 当前计划是否包含可执行操作 */
     public boolean isReady() {
         return questions.isEmpty() && (!paragraphs.isEmpty() || !tables.isEmpty()
-                || !cells.isEmpty() || !runs.isEmpty());
+                || !cells.isEmpty() || !runs.isEmpty() || !charts.isEmpty());
     }
 }

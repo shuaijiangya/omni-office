@@ -8,6 +8,8 @@ import cn.bugstack.office.docx.model.CaptionType;
 import cn.bugstack.office.docx.model.ChartLegendPosition;
 import cn.bugstack.office.docx.model.ChartInline;
 import cn.bugstack.office.docx.model.ChartNode;
+import cn.bugstack.office.docx.model.ChartStylePreset;
+import cn.bugstack.office.docx.model.ChartRenderMode;
 import cn.bugstack.office.docx.model.ChartSeriesNode;
 import cn.bugstack.office.docx.model.CoverPageNode;
 import cn.bugstack.office.docx.model.DocxBlock;
@@ -572,11 +574,16 @@ public class AsposeDocxRenderer implements DocxRenderer {
         double availableWidth = page.getPageWidth() - page.getLeftMargin() - page.getRightMargin();
         double renderedWidth = Math.min(source.getWidthPoints(), availableWidth);
         double renderedHeight = source.getHeightPoints() * renderedWidth / source.getWidthPoints();
+        if (source.getRenderMode() == ChartRenderMode.ECHARTS_IMAGE) {
+            builder.insertImage(new EChartsSvgRenderer().render(source), renderedWidth, renderedHeight);
+            return;
+        }
         Shape shape = builder.insertChart(toAsposeChartType(source),
                 renderedWidth, renderedHeight);
         Chart chart = shape.getChart();
         chart.getSeries().clear();
         String[] categories = source.getCategories().toArray(new String[0]);
+        int seriesIndex = 0;
         for (ChartSeriesNode sourceSeries : source.getSeries()) {
             double[] values = new double[sourceSeries.getValues().size()];
             for (int index = 0; index < values.length; index++) {
@@ -584,6 +591,7 @@ public class AsposeDocxRenderer implements DocxRenderer {
             }
             String seriesName = sourceSeries.getName() == null ? "" : sourceSeries.getName();
             ChartSeries series = chart.getSeries().add(seriesName, categories, values);
+            applyChartPreset(series, source.getStylePreset(), source.getChartType(), seriesIndex++);
             if (source.isShowValues() || source.isShowPercentages()) {
                 series.hasDataLabels(true);
                 series.getDataLabels().setShowValue(source.isShowValues());
@@ -607,6 +615,30 @@ public class AsposeDocxRenderer implements DocxRenderer {
             applyAxisTitle(chart.getAxisY(), source.getValueAxisTitle());
             applyChartFont(chart.getAxisX().getTickLabels().getFont());
             applyChartFont(chart.getAxisY().getTickLabels().getFont());
+        }
+    }
+
+    /** 保持原生 Word 图表可编辑，同时应用受控的系列和数据点配色。 */
+    private void applyChartPreset(ChartSeries series, ChartStylePreset preset,
+                                  cn.bugstack.office.docx.model.ChartType type, int seriesIndex) {
+        if (preset == null || preset == ChartStylePreset.DEFAULT) return;
+        Color[] palette = preset == ChartStylePreset.MONOCHROME
+                ? new Color[]{new Color(45, 45, 45), new Color(110, 110, 110),
+                new Color(170, 170, 170), new Color(215, 215, 215)}
+                : new Color[]{new Color(24, 76, 139), new Color(47, 121, 184),
+                new Color(72, 159, 192), new Color(104, 183, 182)};
+        Color color = palette[seriesIndex % palette.length];
+        series.getFormat().getFill().setForeColor(color);
+        series.getFormat().getStroke().setForeColor(color);
+        if (type == cn.bugstack.office.docx.model.ChartType.LINE
+                || type == cn.bugstack.office.docx.model.ChartType.RADAR) {
+            series.getFormat().getStroke().setWeight(2.25D);
+        }
+        if (type == cn.bugstack.office.docx.model.ChartType.PIE) {
+            for (int index = 0; index < series.getDataPoints().getCount(); index++) {
+                series.getDataPoints().get(index).getFormat().getFill()
+                        .setForeColor(palette[index % palette.length]);
+            }
         }
     }
 

@@ -3,6 +3,8 @@ package cn.bugstack.office.docx.builder;
 import cn.bugstack.office.docx.model.ChartLegendPosition;
 import cn.bugstack.office.docx.model.ChartNode;
 import cn.bugstack.office.docx.model.ChartSeriesNode;
+import cn.bugstack.office.docx.model.ChartStylePreset;
+import cn.bugstack.office.docx.model.ChartRenderMode;
 
 import java.util.Arrays;
 
@@ -20,6 +22,18 @@ public final class ChartBuilder<P> {
 
     /** @param value 标题 @return 当前构建器 */
     public ChartBuilder<P> title(String value) { chart.setTitle(value); return this; }
+    /** @param value Word 原生图表样式预设 @return 当前构建器 */
+    public ChartBuilder<P> style(ChartStylePreset value) {
+        if (value == null) throw new IllegalArgumentException("chart style preset is required");
+        chart.setStylePreset(value);
+        return this;
+    }
+    /** @param value 原生可编辑或 ECharts 静态图 @return 当前构建器 */
+    public ChartBuilder<P> renderMode(ChartRenderMode value) {
+        if (value == null) throw new IllegalArgumentException("chart render mode is required");
+        chart.setRenderMode(value);
+        return this;
+    }
     /** @param values 分类标签 @return 当前构建器 */
     public ChartBuilder<P> categories(String... values) { chart.setCategories(Arrays.asList(values)); return this; }
     /** @param name 系列名称 @param values 数值 @return 当前构建器 */

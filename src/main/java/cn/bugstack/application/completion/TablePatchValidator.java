@@ -37,8 +37,8 @@ public final class TablePatchValidator {
         if (table.isNestedTables()) {
             errors.add("table row patch does not support nested source tables");
         }
-        if (table.isComplexContent()) {
-            errors.add("table contains objects, fields or multiple paragraphs; plain-text patch would lose content");
+        if (table.hasUnsafeDataCells()) {
+            errors.add("table data rows contain objects, fields or multiple paragraphs; plain-text patch would lose content");
         }
         for (int index = 0; index < table.getRows().size(); index++) {
             if (table.getRows().get(index).size() != table.getHeaders().size()) {

@@ -176,6 +176,49 @@ public final class DocumentCompletionPlanValidator {
                 errors.add("BLANKS_ONLY cannot replace a nonempty cell: " + address);
             }
         }
+        Set<String> chartAnchors = new HashSet<>();
+        if (plan.getCharts().size() > 20) errors.add("document cannot insert more than 20 charts");
+        for (ChartPatchPlan chart : plan.getCharts()) {
+            if (chart == null || chart.getAnchorParagraphId() == null) {
+                errors.add("chart patch and anchor are required");
+                continue;
+            }
+            if (!chartAnchors.add(chart.getAnchorParagraphId())) {
+                errors.add("duplicate chart anchor: " + chart.getAnchorParagraphId());
+            }
+            SourceParagraphSnapshot anchor = findParagraph(snapshot, chart.getAnchorParagraphId());
+            if (anchor == null || anchor.isContainsObjects()) {
+                errors.add("chart anchor is missing or contains objects: " + chart.getAnchorParagraphId());
+            }
+            if (!java.util.Arrays.asList("COLUMN", "BAR", "PIE", "LINE", "RADAR")
+                    .contains(chart.getChartType())) {
+                errors.add("unsupported chart type: " + chart.getChartType());
+            }
+            if (chart.getTitle() == null || chart.getTitle().trim().isEmpty()
+                    || chart.getTitle().length() > 200 || chart.getSeriesName() == null
+                    || chart.getSeriesName().trim().isEmpty() || chart.getSeriesName().length() > 200) {
+                errors.add("chart title and series name must be nonblank and at most 200 characters");
+            }
+            if (chart.getCategories().isEmpty() || chart.getCategories().size() > 30
+                    || chart.getCategories().size() != chart.getValues().size()) {
+                errors.add("chart requires 1..30 aligned categories and values");
+            }
+            Set<String> categories = new HashSet<>();
+            for (String category : chart.getCategories()) {
+                if (category == null || category.trim().isEmpty() || category.length() > 200
+                        || !categories.add(category)) errors.add("chart categories must be distinct and nonblank");
+            }
+            for (Double value : chart.getValues()) {
+                if (value == null || !Double.isFinite(value)
+                        || ("PIE".equals(chart.getChartType()) && value < 0D)) {
+                    errors.add("chart values must be finite; pie values must be nonnegative");
+                }
+            }
+            if (!chart.getValueEvidencePaths().isEmpty()
+                    && chart.getValueEvidencePaths().size() != chart.getValues().size()) {
+                errors.add("chart evidence paths must align with values");
+            }
+        }
         return errors;
     }
 

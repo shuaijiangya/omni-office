@@ -2,16 +2,18 @@ package cn.bugstack.application.completion;
 
 import cn.bugstack.office.docx.render.AsposeWordsLicenseLoader;
 import com.aspose.words.Document;
+import com.aspose.words.DocumentBuilder;
 import com.aspose.words.Node;
 import com.aspose.words.NodeCollection;
 import com.aspose.words.NodeType;
 import com.aspose.words.Paragraph;
 import com.aspose.words.Run;
 import com.aspose.words.StyleIdentifier;
+import com.aspose.words.ChartType;
+import com.aspose.words.OutlineLevel;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +44,7 @@ public final class SourceDocxDocumentPatchExecutor {
         try {
             AsposeWordsLicenseLoader.applyConfiguredLicense();
             Document document = new Document(source.toString());
+            Map<String, Paragraph> sourceParagraphs = sourceParagraphs(document, snapshot);
             int updated = 0;
             int appended = 0;
             for (TableCompletionPlanningResult tablePlan : plan.getTables()) {
@@ -56,51 +59,70 @@ public final class SourceDocxDocumentPatchExecutor {
                 SourceTableSnapshot table = findTable(snapshot, cellPlan.getTableId());
                 if (tableExecutor.applyCellToDocument(document, table, cellPlan)) cellsChanged++;
             }
-            Map<String, SourceParagraphSnapshot> paragraphs = new HashMap<>();
-            for (SourceParagraphSnapshot paragraph : snapshot.getParagraphs()) {
-                paragraphs.put(paragraph.getParagraphId(), paragraph);
-            }
             int runsChanged = 0;
             for (RunPatchPlan patch : plan.getRuns()) {
-                SourceParagraphSnapshot anchor = paragraphs.get(patch.getParagraphId());
-                NodeCollection children = document.getSections().get(anchor.getSectionIndex())
-                        .getBody().getChildNodes(NodeType.ANY, false);
-                Paragraph paragraph = (Paragraph) children.get(anchor.getBodyChildIndex());
+                Paragraph paragraph = sourceParagraphs.get(patch.getParagraphId());
                 Run run = (Run) paragraph.getChildNodes(NodeType.RUN, false).get(patch.getRunIndex());
                 if (!run.getText().equals(patch.getText())) {
                     run.setText(patch.getText());
                     runsChanged++;
                 }
             }
-            List<ParagraphPatchPlan> patches = new ArrayList<>(plan.getParagraphs());
-            patches.sort(Comparator.comparingInt((ParagraphPatchPlan patch) ->
-                    paragraphs.get(patch.getParagraphId()).getSectionIndex()).reversed()
-                    .thenComparing(Comparator.comparingInt((ParagraphPatchPlan patch) ->
-                            paragraphs.get(patch.getParagraphId()).getBodyChildIndex()).reversed()));
+            Map<String, Node> lastAfterAnchor = new HashMap<>();
             int paragraphChanges = 0;
-            for (ParagraphPatchPlan patch : patches) {
-                SourceParagraphSnapshot anchor = paragraphs.get(patch.getParagraphId());
-                NodeCollection children = document.getSections().get(anchor.getSectionIndex())
-                        .getBody().getChildNodes(NodeType.ANY, false);
-                Paragraph target = (Paragraph) children.get(anchor.getBodyChildIndex());
+            for (ParagraphPatchPlan patch : plan.getParagraphs()) {
+                Paragraph target = sourceParagraphs.get(patch.getParagraphId());
                 if (patch.getOperation() == ParagraphPatchOperation.REPLACE_TEXT) {
                     replaceText(document, target, patch.getTexts().get(0));
                     paragraphChanges++;
                 } else {
                     Node previous = target;
                     for (String text : patch.getTexts()) {
-                        Paragraph inserted = new Paragraph(document);
-                        inserted.getParagraphFormat().setStyleIdentifier(StyleIdentifier.NORMAL);
-                        inserted.appendChild(new Run(document, text));
+                        Paragraph inserted = bodyParagraphAfter(document, target, text);
                         previous.getParentNode().insertAfter(inserted, previous);
                         previous = inserted;
                         paragraphChanges++;
                     }
+                    lastAfterAnchor.put(patch.getParagraphId(), previous);
                 }
+            }
+            int chartsInserted = 0;
+            for (ChartPatchPlan chartPatch : plan.getCharts()) {
+                Paragraph anchor = sourceParagraphs.get(chartPatch.getAnchorParagraphId());
+                Node after = lastAfterAnchor.getOrDefault(chartPatch.getAnchorParagraphId(), anchor);
+                Paragraph chartParagraph = bodyParagraphAfter(document, anchor, "");
+                after.getParentNode().insertAfter(chartParagraph, after);
+                DocumentBuilder builder = new DocumentBuilder(document);
+                builder.moveTo(chartParagraph);
+                double available = chartParagraph.getParentSection().getPageSetup().getPageWidth()
+                        - chartParagraph.getParentSection().getPageSetup().getLeftMargin()
+                        - chartParagraph.getParentSection().getPageSetup().getRightMargin();
+                double width = Math.min(450D, available);
+                com.aspose.words.Chart chart = builder.insertChart(chartType(chartPatch.getChartType()),
+                        width, width * 0.58D).getChart();
+                chart.getSeries().clear();
+                double[] values = chartPatch.getValues().stream().mapToDouble(Double::doubleValue).toArray();
+                chart.getSeries().add(chartPatch.getSeriesName(),
+                        chartPatch.getCategories().toArray(new String[0]), values);
+                chart.getTitle().setShow(true);
+                chart.getTitle().setText(chartPatch.getTitle());
+                String chartFont = document.getStyles().getByStyleIdentifier(StyleIdentifier.NORMAL)
+                        .getFont().getNameFarEast();
+                if (chartFont == null || chartFont.trim().isEmpty()) {
+                    chartFont = document.getStyles().getByStyleIdentifier(StyleIdentifier.NORMAL)
+                            .getFont().getName();
+                }
+                if (chartFont != null && !chartFont.trim().isEmpty()) {
+                    chart.getTitle().getFont().setName(chartFont);
+                    chart.getLegend().getFont().setName(chartFont);
+                    chart.getAxisX().getTickLabels().getFont().setName(chartFont);
+                    chart.getAxisY().getTickLabels().getFont().setName(chartFont);
+                }
+                chartsInserted++;
             }
             SourceDocxTablePatchExecutor.atomicSave(document, output);
             return new DocumentCompletionResult(output.toAbsolutePath().normalize(),
-                    paragraphChanges, updated, appended, cellsChanged, runsChanged);
+                    paragraphChanges, updated, appended, cellsChanged, runsChanged, chartsInserted);
         } catch (Exception e) {
             throw new IllegalStateException("failed to apply document completion plan", e);
         }
@@ -112,6 +134,69 @@ public final class SourceDocxDocumentPatchExecutor {
         paragraph.removeAllChildren();
         prototype.setText(value);
         paragraph.appendChild(prototype);
+    }
+
+    /** 在修改前固定原段落对象，避免前方插入内容使物理序号漂移。 */
+    private Map<String, Paragraph> sourceParagraphs(Document document, DocumentStructureSnapshot snapshot) {
+        Map<String, Paragraph> anchors = new HashMap<>();
+        for (SourceParagraphSnapshot source : snapshot.getParagraphs()) {
+            NodeCollection children = document.getSections().get(source.getSectionIndex())
+                    .getBody().getChildNodes(NodeType.ANY, false);
+            anchors.put(source.getParagraphId(), (Paragraph) children.get(source.getBodyChildIndex()));
+        }
+        return anchors;
+    }
+
+    /** 新正文沿用同一文档节里最近的非标题段落及其字符样式。 */
+    private Paragraph bodyParagraphAfter(Document document, Paragraph anchor, String text) {
+        Paragraph sample = null;
+        Node next = anchor.getNextSibling();
+        while (next != null) {
+            if (next instanceof Paragraph) {
+                Paragraph candidate = (Paragraph) next;
+                if (isHeading(candidate)) break;
+                sample = candidate;
+                break;
+            }
+            next = next.getNextSibling();
+        }
+        if (sample == null) {
+            Node previous = anchor.getPreviousSibling();
+            while (previous != null) {
+                if (previous instanceof Paragraph && !isHeading((Paragraph) previous)) {
+                    sample = (Paragraph) previous;
+                    break;
+                }
+                previous = previous.getPreviousSibling();
+            }
+        }
+        Paragraph result = sample == null ? new Paragraph(document) : (Paragraph) sample.deepClone(true);
+        if (sample == null) result.getParagraphFormat().setStyleIdentifier(StyleIdentifier.NORMAL);
+        Run fontSample = sample != null && sample.getRuns().getCount() > 0
+                ? (Run) sample.getRuns().get(0).deepClone(true) : new Run(document);
+        result.removeAllChildren();
+        if (!text.isEmpty()) {
+            fontSample.setText(text);
+            result.appendChild(fontSample);
+        }
+        return result;
+    }
+
+    /** 识别 Word 语义标题，避免把标题字体复制到新正文。 */
+    private boolean isHeading(Paragraph paragraph) {
+        int outline = paragraph.getParagraphFormat().getOutlineLevel();
+        return outline >= OutlineLevel.LEVEL_1 && outline <= OutlineLevel.LEVEL_9;
+    }
+
+    /** 将受控图表类型映射为 Aspose 原生图表。 */
+    private int chartType(String type) {
+        switch (type) {
+            case "BAR": return ChartType.BAR;
+            case "PIE": return ChartType.PIE;
+            case "LINE": return ChartType.LINE;
+            case "RADAR": return ChartType.RADAR;
+            default: return ChartType.COLUMN;
+        }
     }
 
     private SourceTableSnapshot findTable(DocumentStructureSnapshot snapshot, String tableId) {

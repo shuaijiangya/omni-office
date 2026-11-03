@@ -7,6 +7,7 @@ import cn.bugstack.application.generation.FileGenerationJobRepositoryProvider;
 import cn.bugstack.application.generation.GenerationQuotaPolicy;
 import com.aspose.words.Document;
 import com.aspose.words.DocumentBuilder;
+import com.aspose.words.SaveFormat;
 import cn.bugstack.application.external.security.RequestIdentity;
 import cn.bugstack.application.external.security.StaticApiKeyAuthenticator;
 import cn.bugstack.application.external.security.HttpAuthenticationRequest;
@@ -43,6 +44,8 @@ class McpHttpServerTest {
         Document document = new Document();
         new DocumentBuilder(document).writeln("待补充章节");
         document.save(source.toString());
+        java.nio.file.Path legacySource = root.resolve("input.doc");
+        document.save(legacySource.toString(), SaveFormat.DOC);
         McpHttpServerConfig config = new McpHttpServerConfig(new InetSocketAddress("127.0.0.1", 0),
                 root, Collections.emptySet(), 2 * 1024 * 1024,
                 500, 4, Duration.ofSeconds(30), Duration.ofMinutes(5));
@@ -89,6 +92,20 @@ class McpHttpServerTest {
                     .header("Content-Type", ExternalDocumentToolApplication.DOCX_MEDIA_TYPE)
                     .POST(HttpRequest.BodyPublishers.ofString("not a DOCX"))
                     .build(), HttpResponse.BodyHandlers.ofByteArray()).statusCode());
+            HttpResponse<byte[]> legacyUpload = client.send(HttpRequest.newBuilder(endpoint)
+                    .header("X-API-Key", "alice-key-1")
+                    .header("Content-Type", ExternalDocumentToolApplication.DOC_MEDIA_TYPE)
+                    .POST(HttpRequest.BodyPublishers.ofFile(legacySource))
+                    .build(), HttpResponse.BodyHandlers.ofByteArray());
+            assertEquals(201, legacyUpload.statusCode());
+            String legacyId = mapper.readTree(legacyUpload.body()).path("sourceArtifactId").asText();
+            assertEquals(200, get(endpoint.resolve("/artifacts/" + legacyId), "alice-key-1").statusCode());
+            assertEquals(404, get(endpoint.resolve("/artifacts/" + legacyId), "bob-key-1").statusCode());
+            assertEquals(422, client.send(HttpRequest.newBuilder(endpoint)
+                    .header("X-API-Key", "alice-key-1")
+                    .header("Content-Type", ExternalDocumentToolApplication.DOC_MEDIA_TYPE)
+                    .POST(HttpRequest.BodyPublishers.ofFile(source))
+                    .build(), HttpResponse.BodyHandlers.ofByteArray()).statusCode());
 
             URI mcpEndpoint = endpoint.resolve("/mcp");
             HttpResponse<byte[]> initialized = post(mcpEndpoint, "alice-key-1", null, initialize());
@@ -99,6 +116,13 @@ class McpHttpServerTest {
                     .set("arguments", mapper.createObjectNode().put("sourceArtifactId", id));
             assertFalse(json(post(mcpEndpoint, "alice-key-1", session, analyze))
                     .path("result").path("structuredContent").path("paragraphs").isEmpty());
+            ObjectNode analyzeLegacy = request(20, "tools/call");
+            analyzeLegacy.putObject("params").put("name", ExternalDocumentToolApplication.ANALYZE_SOURCE_DOCX)
+                    .set("arguments", mapper.createObjectNode().put("sourceArtifactId", legacyId));
+            JsonNode legacyStructure = json(post(mcpEndpoint, "alice-key-1", session, analyzeLegacy))
+                    .path("result").path("structuredContent");
+            assertEquals("source.doc", legacyStructure.path("fileName").asText());
+            assertFalse(legacyStructure.path("paragraphs").isEmpty());
 
             ObjectNode planCall = request(3, "tools/call");
             planCall.putObject("params").put("name", ExternalDocumentToolApplication.PLAN_SOURCE_DOCX)
@@ -120,6 +144,21 @@ class McpHttpServerTest {
             assertFalse(outputId.isBlank());
             assertEquals(200, get(endpoint.resolve("/artifacts/" + outputId), "alice-key-1").statusCode());
             assertEquals(404, get(endpoint.resolve("/artifacts/" + outputId), "bob-key-1").statusCode());
+            ObjectNode legacyPlanCall = request(21, "tools/call");
+            legacyPlanCall.putObject("params").put("name", ExternalDocumentToolApplication.PLAN_SOURCE_DOCX)
+                    .set("arguments", mapper.createObjectNode().put("sourceArtifactId", legacyId)
+                            .put("instruction", "根据已确认事实填写设计内容")
+                            .set("businessFacts", mapper.createObjectNode().put("content", "已确认的设计内容")));
+            JsonNode legacyPlan = json(post(mcpEndpoint, "alice-key-1", session, legacyPlanCall))
+                    .path("result").path("structuredContent");
+            assertEquals("READY", legacyPlan.path("status").asText());
+            ObjectNode legacyApplyCall = request(22, "tools/call");
+            legacyApplyCall.putObject("params").put("name", ExternalDocumentToolApplication.APPLY_SOURCE_DOCX)
+                    .set("arguments", mapper.createObjectNode().put("sourceArtifactId", legacyId)
+                            .put("approved", true).set("reviewedPlan", legacyPlan));
+            JsonNode legacyCompleted = json(post(mcpEndpoint, "alice-key-1", session, legacyApplyCall))
+                    .path("result").path("structuredContent");
+            assertEquals("document.docx", legacyCompleted.path("artifact").path("fileName").asText());
         }
     }
 

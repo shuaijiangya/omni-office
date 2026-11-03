@@ -1,6 +1,9 @@
 # Build outputs and local proprietary dependencies
 target/
 lib/
+tools/echarts/node_modules/
+__pycache__/
+*.pyc
 
 # Aspose license files must never be committed
 *.lic

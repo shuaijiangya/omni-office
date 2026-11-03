@@ -10,7 +10,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 import java.util.UUID;
 
-/** 保存上传源 DOCX 的最小文件存储；业务层负责认证，并通过 ownerId 隔离文档。 */
+/** 保存上传源 Word 文档的最小文件存储；业务层负责认证，并通过 ownerId 隔离文档。 */
 public final class SourceDocxUploadStore {
 
     private static final long MAX_BYTES = 100L * 1024L * 1024L;
@@ -23,20 +23,21 @@ public final class SourceDocxUploadStore {
         this.root = root.toAbsolutePath().normalize();
     }
 
-    /** 上传一份 DOCX，返回不可猜测的文档 ID。 */
+    /** 上传一份 .doc 或 .docx，返回不可猜测的文档 ID。 */
     public String upload(String ownerId, String originalFilename, InputStream input) {
         requireOwner(ownerId);
-        if (originalFilename == null || !originalFilename.toLowerCase(Locale.ROOT).endsWith(".docx")
-                || input == null) {
-            throw new IllegalArgumentException("a DOCX filename and input stream are required");
+        String extension = originalFilename == null ? "" : originalFilename.toLowerCase(Locale.ROOT);
+        if ((!extension.endsWith(".docx") && !extension.endsWith(".doc")) || input == null) {
+            throw new IllegalArgumentException("a .doc or .docx filename and input stream are required");
         }
+        extension = extension.endsWith(".docx") ? ".docx" : ".doc";
         String id = UUID.randomUUID().toString();
         Path temporary = null;
-        Path document = root.resolve(id + ".docx");
+        Path document = root.resolve(id + extension);
         Path ownerFile = root.resolve(id + ".owner");
         try {
             Files.createDirectories(root);
-            temporary = Files.createTempFile(root, ".incoming-", ".docx");
+            temporary = Files.createTempFile(root, ".incoming-", extension);
             try (InputStream stream = input) {
                 byte[] buffer = new byte[8192];
                 long total = 0;
@@ -44,11 +45,11 @@ public final class SourceDocxUploadStore {
                 try (java.io.OutputStream out = Files.newOutputStream(temporary)) {
                     while ((count = stream.read(buffer)) != -1) {
                         total += count;
-                        if (total > MAX_BYTES) throw new IllegalArgumentException("source DOCX exceeds 100 MiB");
+                        if (total > MAX_BYTES) throw new IllegalArgumentException("source Word document exceeds 100 MiB");
                         out.write(buffer, 0, count);
                     }
                 }
-                if (total == 0) throw new IllegalArgumentException("source DOCX is empty");
+                if (total == 0) throw new IllegalArgumentException("source Word document is empty");
             }
             extractor.extract(temporary);
             Files.write(ownerFile, ownerId.getBytes(StandardCharsets.UTF_8));
@@ -65,7 +66,7 @@ public final class SourceDocxUploadStore {
             } catch (IOException cleanup) {
                 e.addSuppressed(cleanup);
             }
-            throw new IllegalArgumentException("failed to store uploaded DOCX", e);
+            throw new IllegalArgumentException("failed to store uploaded Word document", e);
         }
     }
 
@@ -77,10 +78,11 @@ public final class SourceDocxUploadStore {
         }
         Path ownerFile = root.resolve(documentId + ".owner");
         Path document = root.resolve(documentId + ".docx");
+        if (!Files.isRegularFile(document)) document = root.resolve(documentId + ".doc");
         try {
             if (!Files.isRegularFile(ownerFile) || !Files.isRegularFile(document)
                     || !ownerId.equals(new String(Files.readAllBytes(ownerFile), StandardCharsets.UTF_8))) {
-                throw new IllegalArgumentException("uploaded DOCX was not found for this owner");
+                throw new IllegalArgumentException("uploaded Word document was not found for this owner");
             }
             return document;
         } catch (IOException e) {

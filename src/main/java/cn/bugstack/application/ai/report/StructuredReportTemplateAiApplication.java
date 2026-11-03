@@ -46,8 +46,8 @@ public final class StructuredReportTemplateAiApplication {
             + "因此 prompt 必须写‘从 facts 中 /content 提取……’，不能要求读取 sourceText 或再次设计模板。"
             + "prompt 要指出本节读取哪类事实、写成什么形式、不能编造什么；"
             + "不要写‘设计模板’‘生成标题’‘撰写本节’等空泛指令，也不要把具体业务事实预填入 prompt。"
-            + "dataRefs 固定为 [\"/content\"]；allowedBlocks 只用 paragraph、bulletList、numberedList、table。"
-            + "prompt 提到表格时 allowedBlocks 必须含 table；只说段落时只允许 paragraph。"
+            + "dataRefs 固定为 [\"/content\"]；allowedBlocks 只用 paragraph、bulletList、numberedList、table、chart。"
+            + "prompt 提到表格时 allowedBlocks 必须含 table；提到图表且事实含数值数据时必须含 chart；只说段落时只允许 paragraph。"
             + "如需按记录数量选择段落或表格，在 prompt 中写明条件并同时允许 paragraph 和 table。"
             + "不要编造来源、结论或数据。";
 
@@ -249,8 +249,13 @@ public final class StructuredReportTemplateAiApplication {
         sectionFields.putObject("allowedBlocks").put("type", "array").put("minItems", 1)
                 .put("description", "必须与本节 prompt 的输出形式一致：要求表格必须包含 table")
                 .putObject("items").put("type", "string").putArray("enum")
-                .add("paragraph").add("bulletList").add("numberedList").add("table");
+                .add("paragraph").add("bulletList").add("numberedList").add("table").add("chart");
         sectionFields.putObject("maxChars").put("type", "integer").put("minimum", 1).put("maximum", 20000);
+        sectionFields.putObject("chartStylePreset").put("type", "string").putArray("enum")
+                .add("DEFAULT").add("BUSINESS_BLUE").add("MONOCHROME");
+        sectionFields.putObject("chartRenderMode").put("type", "string").putArray("enum")
+                .add("NATIVE_WORD").add("ECHARTS_IMAGE");
+        sectionFields.putObject("editableRequired").put("type", "boolean");
         writing.putArray("required").add("id").add("level").add("title").add("mode")
                 .add("prompt").add("dataRefs").add("allowedBlocks");
         root.putArray("required").add("schemaVersion").add("templateId")

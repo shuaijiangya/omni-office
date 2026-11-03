@@ -5,9 +5,12 @@ import cn.bugstack.application.ai.StructuredAiRequest;
 import cn.bugstack.application.ai.InternalAiDocumentApplication;
 import cn.bugstack.protocol.document.DocumentSpec;
 import cn.bugstack.protocol.document.block.BulletListBlockSpec;
+import cn.bugstack.protocol.document.block.ChartBlockSpec;
 import cn.bugstack.protocol.document.block.SubsectionBlockSpec;
 import cn.bugstack.protocol.document.block.TableBlockSpec;
 import com.aspose.words.Document;
+import com.aspose.words.NodeType;
+import com.aspose.words.Shape;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -164,6 +167,35 @@ class StructuredReportAiApplicationTest {
         assertThrows(IllegalStateException.class,
                 () -> new StructuredReportAiApplication(client).generate(oneSection, facts()));
         assertEquals(2, client.requests.size());
+    }
+
+    @Test
+    void generatesEditableNativeChartFromSectionFacts() throws Exception {
+        JsonNode chartTemplate = mapper.readTree("{\"schemaVersion\":\"1.0\",\"templateId\":\"chart\","
+                + "\"version\":\"1.0\",\"title\":\"指标报告\",\"sections\":[{"
+                + "\"id\":\"metrics\",\"level\":1,\"title\":\"指标分析\",\"prompt\":\"生成柱状图\","
+                + "\"chartStylePreset\":\"BUSINESS_BLUE\","
+                + "\"dataRefs\":[\"/metrics\"],\"allowedBlocks\":[\"chart\"],"
+                + "\"requiredBlocks\":[\"chart\"]}]}" );
+        JsonNode chartFacts = mapper.readTree("{\"metrics\":{\"categories\":[\"一月\",\"二月\"],"
+                + "\"values\":[12,18]}}" );
+        StructuredAiClient client = request -> "{\"sectionId\":\"metrics\",\"status\":\"READY\","
+                + "\"blocks\":[{\"type\":\"chart\",\"chartType\":\"COLUMN\","
+                + "\"title\":\"月度指标\",\"categories\":[\"一月\",\"二月\"],"
+                + "\"series\":[{\"name\":\"处理量\",\"values\":[12,18]}],"
+                + "\"factRefs\":[\"/metrics\"]}],\"questions\":[]}";
+        StructuredReportAiApplication app = new StructuredReportAiApplication(client);
+        DocumentSpec spec = app.generate(chartTemplate, chartFacts);
+        assertTrue(spec.getSections().get(0).getBlocks().get(0) instanceof ChartBlockSpec);
+        assertEquals("BUSINESS_BLUE", ((ChartBlockSpec) spec.getSections().get(0)
+                .getBlocks().get(0)).getStylePreset());
+        Path target = output.resolve("ai-native-chart.docx");
+        app.generateDocx(chartTemplate, chartFacts, target);
+        Document word = new Document(target.toString());
+        assertTrue(word.getChildNodes(NodeType.SHAPE, true).getCount() > 0);
+        assertTrue(((Shape) word.getChildNodes(NodeType.SHAPE, true).get(0)).hasChart());
+        assertEquals(new java.awt.Color(24, 76, 139), ((Shape) word.getChildNodes(NodeType.SHAPE, true)
+                .get(0)).getChart().getSeries().get(0).getFormat().getFill().getForeColor());
     }
 
     private JsonNode template() throws Exception {

@@ -74,6 +74,7 @@ public final class ExternalDocumentToolApplication {
     public static final String APPLY_SOURCE_DOCX = "omni_source_docx_apply";
     public static final String DOCX_MEDIA_TYPE =
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    public static final String DOC_MEDIA_TYPE = "application/msword";
     private static final int MAX_SOURCE_UPLOAD_BYTES = 25 * 1024 * 1024;
 
     private final ObjectMapper mapper;
@@ -231,17 +232,23 @@ public final class ExternalDocumentToolApplication {
 
     /** 校验上传文件并存入当前主体私有工件库；不会修改上传内容。 */
     public ExternalArtifactReference uploadSourceDocx(byte[] content, String principalId) {
+        return uploadSourceWord(content, DOCX_MEDIA_TYPE, principalId);
+    }
+
+    /** 校验 DOC 或 DOCX 的真实格式并原样保存到当前主体的私有工件库。 */
+    public ExternalArtifactReference uploadSourceWord(byte[] content, String mediaType, String principalId) {
         if (content == null || content.length == 0 || content.length > MAX_SOURCE_UPLOAD_BYTES) {
-            throw new IllegalArgumentException("source DOCX must contain 1 to 26214400 bytes");
+            throw new IllegalArgumentException("source Word document must contain 1 to 26214400 bytes");
         }
+        String extension = sourceExtension(mediaType);
         requirePrincipalId(principalId);
-        Path source = temporarySource();
+        Path source = temporarySource(extension);
         try {
             Files.write(source, content);
             completion().analyze(source);
-            return outputStore.storeForPrincipal(source, "source.docx", DOCX_MEDIA_TYPE, principalId);
+            return outputStore.storeForPrincipal(source, "source" + extension, mediaType, principalId);
         } catch (IOException e) {
-            throw new IllegalStateException("failed to stage source DOCX", e);
+            throw new IllegalStateException("failed to stage source Word document", e);
         } finally {
             deleteTemporary(source);
         }
@@ -453,7 +460,7 @@ public final class ExternalDocumentToolApplication {
             DocumentStructureSnapshot snapshot = sectionIndex == null
                     ? completion().analyze(source) : completion().analyzeSection(source, sectionIndex);
             ObjectNode response = mapper.valueToTree(snapshot);
-            response.put("fileName", "source.docx");
+            response.put("fileName", "source" + sourceExtensionFromPath(source));
             if (response.toString().length() > 1_000_000) {
                 throw new IllegalArgumentException("source structure is too large; specify sectionIndex");
             }
@@ -521,27 +528,37 @@ public final class ExternalDocumentToolApplication {
         }
         ResolvedExternalArtifact artifact = outputStore.resolveForPrincipal(
                 "omni-office://artifacts/" + id, principalId, false);
-        if (!DOCX_MEDIA_TYPE.equals(artifact.getReference().getMediaType())
-                || !"source.docx".equals(artifact.getReference().getFileName())) {
-            throw new IllegalArgumentException("artifact is not an uploaded source DOCX");
+        String extension = sourceExtension(artifact.getReference().getMediaType());
+        if (!("source" + extension).equals(artifact.getReference().getFileName())) {
+            throw new IllegalArgumentException("artifact is not an uploaded source Word document");
         }
-        Path source = temporarySource();
+        Path source = temporarySource(extension);
         try {
             Files.copy(artifact.getContentPath(), source, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             return action.apply(source);
         } catch (IOException e) {
-            throw new IllegalStateException("failed to stage source DOCX", e);
+            throw new IllegalStateException("failed to stage source Word document", e);
         } finally {
             deleteTemporary(source);
         }
     }
 
-    private Path temporarySource() {
+    private Path temporarySource(String extension) {
         try {
-            return Files.createTempFile("omni-source-", ".docx");
+            return Files.createTempFile("omni-source-", extension);
         } catch (IOException e) {
-            throw new IllegalStateException("failed to create source DOCX staging file", e);
+            throw new IllegalStateException("failed to create source Word staging file", e);
         }
+    }
+
+    private String sourceExtension(String mediaType) {
+        if (DOCX_MEDIA_TYPE.equals(mediaType)) return ".docx";
+        if (DOC_MEDIA_TYPE.equals(mediaType)) return ".doc";
+        throw new IllegalArgumentException("only DOC and DOCX source media types are supported");
+    }
+
+    private String sourceExtensionFromPath(Path source) {
+        return source.getFileName().toString().endsWith(".docx") ? ".docx" : ".doc";
     }
 
     private Integer optionalSectionIndex(JsonNode arguments) {

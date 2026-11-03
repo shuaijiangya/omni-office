@@ -621,15 +621,16 @@ public final class McpHttpServer implements AutoCloseable {
         }
         try {
             String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
-            if (contentType == null || !contentType.split(";", 2)[0].trim()
-                    .equals(ExternalDocumentToolApplication.DOCX_MEDIA_TYPE)) {
-                sendProblem(exchange, 415, "UNSUPPORTED_MEDIA_TYPE", "DOCX Content-Type is required");
+            String mediaType = contentType == null ? "" : contentType.split(";", 2)[0].trim();
+            if (!ExternalDocumentToolApplication.DOCX_MEDIA_TYPE.equals(mediaType)
+                    && !ExternalDocumentToolApplication.DOC_MEDIA_TYPE.equals(mediaType)) {
+                sendProblem(exchange, 415, "UNSUPPORTED_MEDIA_TYPE", "DOC or DOCX Content-Type is required");
                 return;
             }
             try {
                 byte[] source = readBounded(exchange.getRequestBody(), 25 * 1024 * 1024);
                 ExternalArtifactReference artifact = tenants.require(identity.getTenantId())
-                        .uploadSourceDocx(source, identity.getPrincipalId());
+                        .uploadSourceWord(source, mediaType, identity.getPrincipalId());
                 ObjectNode response = mapper.createObjectNode();
                 response.put("sourceArtifactId", artifact.getArtifactId());
                 response.put("resourceUri", artifact.getResourceUri());
@@ -638,7 +639,7 @@ public final class McpHttpServer implements AutoCloseable {
                 sendJson(exchange, 201, response);
                 audit(identity, "source_docx.upload", "SUCCESS");
             } catch (PayloadTooLargeException e) {
-                sendProblem(exchange, 413, "SOURCE_TOO_LARGE", "source DOCX exceeds 25 MiB");
+                sendProblem(exchange, 413, "SOURCE_TOO_LARGE", "source Word document exceeds 25 MiB");
             } catch (IllegalArgumentException e) {
                 sendProblem(exchange, 422, "SOURCE_DOCX_INVALID", safeMessage(e));
             } catch (IllegalStateException e) {

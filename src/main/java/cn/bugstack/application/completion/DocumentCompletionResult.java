@@ -11,6 +11,7 @@ public final class DocumentCompletionResult {
     private final int rowsAppended;
     private final int cellsChanged;
     private final int runsChanged;
+    private final int chartsInserted;
 
     /** 创建保存结果。 */
     public DocumentCompletionResult(Path outputPath, int paragraphsChanged,
@@ -27,12 +28,20 @@ public final class DocumentCompletionResult {
     /** 创建包含 Run 定点补全统计的保存结果。 */
     public DocumentCompletionResult(Path outputPath, int paragraphsChanged,
                                     int rowsUpdated, int rowsAppended, int cellsChanged, int runsChanged) {
+        this(outputPath, paragraphsChanged, rowsUpdated, rowsAppended, cellsChanged, runsChanged, 0);
+    }
+
+    /** 创建包含原生图表插入统计的保存结果。 */
+    public DocumentCompletionResult(Path outputPath, int paragraphsChanged,
+                                    int rowsUpdated, int rowsAppended, int cellsChanged,
+                                    int runsChanged, int chartsInserted) {
         this.outputPath = outputPath;
         this.paragraphsChanged = paragraphsChanged;
         this.rowsUpdated = rowsUpdated;
         this.rowsAppended = rowsAppended;
         this.cellsChanged = cellsChanged;
         this.runsChanged = runsChanged;
+        this.chartsInserted = chartsInserted;
     }
 
     /** @return 输出 DOCX 路径 */
@@ -52,4 +61,7 @@ public final class DocumentCompletionResult {
 
     /** @return 定点写入的 Run 数量 */
     public int getRunsChanged() { return runsChanged; }
+
+    /** @return 插入的可编辑 Word 原生图表数量 */
+    public int getChartsInserted() { return chartsInserted; }
 }

@@ -13,13 +13,16 @@ DOCX、PDF 或单文件 HTML；新增能力不会替换或隐式回退到现有 
 > **[Aspose.Words 到 omni-office 迁移对照指南](docs/aspose-words-migration-guide.md)**。
 >
 > 上传已有 Word 后由 AI 和 Function Calling 精准补充表格，请查看
-> **[上传 DOCX 的 AI 识别与精准补全](docs/source-docx-ai-completion.md)**（含[复杂文档完整补全示例](docs/complex-source-docx-sample.md)、[功能验证](docs/source-docx-completion-verification.md)与[本地 Ollama 多样本实测](docs/source-docx-ollama-live-verification.md)）。
+> **[上传 Word 的 AI 识别与精准补全](docs/source-docx-ai-completion.md)**（支持 `.doc` / `.docx` 输入与 DOCX 输出，含无需预设槽位的动态正文/表格/图表补全、[复杂文档完整补全示例](docs/complex-source-docx-sample.md)、[功能验证](docs/source-docx-completion-verification.md)与[本地 Ollama 多样本实测](docs/source-docx-ollama-live-verification.md)）。
 >
 > 按原始 CSCI 详细设计模板、Java 源码 ZIP 和可选 DDL 生成完整文档，请查看
 > **[CSCI 源码驱动详细设计](docs/csci-source-driven-design.md)**。
 >
 > 按预设标题层级和逐标题提示词，结合业务 JSON 生成报告，请查看
 > **[结构化标题模板＋逐标题 AI 填充](docs/structured-report-ai.md)**。
+
+> 已有 DOCX 需要自动识别章节、样式、表格和占位符并保持原排版写回时，参见
+> **[上传 Word 模板、AI 填充与图表](docs/docx-template-ai-charts.md)**（含 Word 原生可编辑图表与可选 ECharts SVG）。
 
 ## 核心特性
 

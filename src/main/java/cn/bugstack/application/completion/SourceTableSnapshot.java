@@ -107,6 +107,21 @@ public final class SourceTableSnapshot {
     /** @return 表格中是否含图片、字段、多段落等不能直接用纯文本替换的内容 */
     public boolean isComplexContent() { return complexContent; }
 
+    /**
+     * 行补丁只克隆或修改数据行，表头始终保留原样。表头中的书签等对象
+     * 不应阻止安全数据行的补全，但数据行中的对象仍须拒绝覆盖。
+     *
+     * @return 数据行是否含不能安全写入的单元格
+     */
+    public boolean hasUnsafeDataCells() {
+        for (int row = 1; row < writableCells.size(); row++) {
+            for (Boolean writable : writableCells.get(row)) {
+                if (!Boolean.TRUE.equals(writable)) return true;
+            }
+        }
+        return false;
+    }
+
     /** @return 各物理单元格是否可在不删除现有对象的情况下替换纯文本 */
     public List<List<Boolean>> getWritableCells() { return writableCells; }
 

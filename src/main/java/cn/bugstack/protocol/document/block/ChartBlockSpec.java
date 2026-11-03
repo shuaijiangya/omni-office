@@ -13,6 +13,8 @@ import java.util.List;
 public final class ChartBlockSpec extends BlockSpec {
 
     private String chartType = "COLUMN";
+    private String stylePreset = "DEFAULT";
+    private String renderMode = "NATIVE_WORD";
     private String title;
     private List<String> categories = new ArrayList<>();
     private List<ChartSeriesSpec> series = new ArrayList<>();
@@ -33,6 +35,18 @@ public final class ChartBlockSpec extends BlockSpec {
 
     /** @param chartType COLUMN、BAR、PIE、LINE 或 RADAR */
     public void setChartType(String chartType) { this.chartType = chartType; }
+
+    /** @return DEFAULT、BUSINESS_BLUE 或 MONOCHROME */
+    public String getStylePreset() { return stylePreset; }
+
+    /** @param stylePreset 命名的 Word 原生图表视觉预设 */
+    public void setStylePreset(String stylePreset) { this.stylePreset = stylePreset; }
+
+    /** @return NATIVE_WORD 或 ECHARTS_IMAGE */
+    public String getRenderMode() { return renderMode; }
+
+    /** @param renderMode 图表输出方式；图片不具备 Word 图表编辑能力 */
+    public void setRenderMode(String renderMode) { this.renderMode = renderMode; }
 
     /** @return 图表标题 */
     public String getTitle() { return title; }

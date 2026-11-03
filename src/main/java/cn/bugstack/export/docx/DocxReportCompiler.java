@@ -28,6 +28,8 @@ import cn.bugstack.office.docx.api.DocxDocument;
 import cn.bugstack.office.docx.builder.SectionBuilder;
 import cn.bugstack.office.docx.model.ChartLegendPosition;
 import cn.bugstack.office.docx.model.ChartType;
+import cn.bugstack.office.docx.model.ChartStylePreset;
+import cn.bugstack.office.docx.model.ChartRenderMode;
 import cn.bugstack.office.docx.model.TableHorizontalAlignment;
 import cn.bugstack.office.docx.model.TableVerticalMerge;
 import cn.bugstack.office.docx.style.RunStyle;
@@ -564,6 +566,8 @@ public final class DocxReportCompiler implements ReportDocumentRenderer {
         cn.bugstack.office.docx.builder.ChartBuilder<
                 cn.bugstack.office.docx.builder.ParagraphBuilder<SectionBuilder>> builder = paragraph
                 .chart(ChartType.valueOf(chart.getChartType().name()))
+                .style(ChartStylePreset.valueOf(chart.getStylePreset()))
+                .renderMode(ChartRenderMode.valueOf(chart.getRenderMode()))
                 .title(chart.getTitle())
                 .categories(chart.getCategories().toArray(new String[0]))
                 .size(chart.getWidthPoints(), chart.getHeightPoints())

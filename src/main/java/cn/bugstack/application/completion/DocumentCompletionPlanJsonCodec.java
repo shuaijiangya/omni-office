@@ -62,6 +62,17 @@ public final class DocumentCompletionPlanJsonCodec {
             item.put("text", patch.getText());
             item.put("overwritePolicy", patch.getOverwritePolicy().name());
         }
+        ArrayNode charts = root.putArray("chartPatches");
+        for (ChartPatchPlan patch : plan.getCharts()) {
+            ObjectNode item = charts.addObject();
+            item.put("anchorParagraphId", patch.getAnchorParagraphId());
+            item.put("chartType", patch.getChartType());
+            item.put("title", patch.getTitle());
+            item.set("categories", mapper.valueToTree(patch.getCategories()));
+            item.put("seriesName", patch.getSeriesName());
+            item.set("values", mapper.valueToTree(patch.getValues()));
+            item.set("valueEvidencePaths", mapper.valueToTree(patch.getValueEvidencePaths()));
+        }
         return root;
     }
 
@@ -154,8 +165,33 @@ public final class DocumentCompletionPlanJsonCodec {
                         TableOverwritePolicy.valueOf(required(item, "overwritePolicy"))));
             }
         }
+        List<ChartPatchPlan> charts = new ArrayList<>();
+        JsonNode chartNodes = root.path("chartPatches");
+        if (!chartNodes.isMissingNode() && !chartNodes.isArray()) {
+            throw new IllegalArgumentException("chartPatches must be an array");
+        }
+        if (chartNodes.isArray()) {
+            for (JsonNode item : chartNodes) {
+                JsonNode valueNodes = item.path("values");
+                if (!valueNodes.isArray()) throw new IllegalArgumentException("chart values must be an array");
+                List<Double> values = new ArrayList<>();
+                for (JsonNode value : valueNodes) {
+                    if (!value.isNumber() || !Double.isFinite(value.asDouble())) {
+                        throw new IllegalArgumentException("chart values must be finite numbers");
+                    }
+                    values.add(value.asDouble());
+                }
+                charts.add(new ChartPatchPlan(required(item, "anchorParagraphId"),
+                        required(item, "chartType"), required(item, "title"),
+                        strings(item.path("categories"), "categories"),
+                        required(item, "seriesName"), values,
+                        item.path("valueEvidencePaths").isMissingNode()
+                                ? Collections.emptyList()
+                                : strings(item.path("valueEvidencePaths"), "valueEvidencePaths")));
+            }
+        }
         return new DocumentCompletionPlan(snapshot.getSha256(), paragraphs, tables, cells, runs,
-                confidence, reason, questions);
+                charts, confidence, reason, questions);
     }
 
     private String textValue(JsonNode node, String name) {

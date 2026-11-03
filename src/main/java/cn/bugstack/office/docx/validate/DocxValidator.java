@@ -83,6 +83,8 @@ public class DocxValidator {
     /** 校验底层图表类型、尺寸以及分类与系列矩阵。 */
     private void validateChart(ChartNode chart, String path, ValidationResult result) {
         if (chart.getChartType() == null) result.addMessage(path + " chart type must not be null");
+        if (chart.getStylePreset() == null) result.addMessage(path + " chart style preset must not be null");
+        if (chart.getRenderMode() == null) result.addMessage(path + " chart render mode must not be null");
         if (chart.getCategories().isEmpty()) result.addMessage(path + " chart categories must not be empty");
         if (chart.getSeries().isEmpty()) result.addMessage(path + " chart series must not be empty");
         if (!Double.isFinite(chart.getWidthPoints()) || !Double.isFinite(chart.getHeightPoints())

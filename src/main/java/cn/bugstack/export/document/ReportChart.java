@@ -8,6 +8,8 @@ import java.util.List;
 public final class ReportChart implements ReportElement {
 
     private ReportChartType chartType = ReportChartType.COLUMN;
+    private String stylePreset = "DEFAULT";
+    private String renderMode = "NATIVE_WORD";
     private String title;
     private final List<String> categories = new ArrayList<>();
     private final List<ReportChartSeries> series = new ArrayList<>();
@@ -26,6 +28,10 @@ public final class ReportChart implements ReportElement {
 
     /** @return 图表类型 */ public ReportChartType getChartType() { return chartType; }
     /** @param chartType 图表类型 */ public void setChartType(ReportChartType chartType) { this.chartType = chartType; }
+    /** @return 命名的图表样式预设 */ public String getStylePreset() { return stylePreset; }
+    /** @param stylePreset 命名的图表样式预设 */ public void setStylePreset(String stylePreset) { this.stylePreset = stylePreset; }
+    /** @return 图表输出方式 */ public String getRenderMode() { return renderMode; }
+    /** @param renderMode 图表输出方式 */ public void setRenderMode(String renderMode) { this.renderMode = renderMode; }
     /** @return 图表标题 */ public String getTitle() { return title; }
     /** @param title 图表标题 */ public void setTitle(String title) { this.title = title; }
     /** @return 分类标签 */ public List<String> getCategories() { return Collections.unmodifiableList(categories); }

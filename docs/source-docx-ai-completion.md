@@ -1,8 +1,60 @@
-# 上传 DOCX 的 AI 识别与精准补全
+# 上传 Word 的 AI 识别与精准补全
 
 本能力用于处理用户已有的 Word 文档，无需预先定义“设计文档章节对象”：系统提取正文段落和表格
 结构，LLM 根据用户描述选择待补位置，必要时通过白名单 Function Calling 获取业务事实，再由本地
 校验器审核锚点、覆盖策略和行主键，最后写入一份新的 DOCX 供人工预览。
+
+## 不预设正文提示词的动态补全（Java 入口）
+
+当用户只说“按照业务数据，把当前文章能补充的内容补充一下”时，不必把正文段落写成固定提示词，
+也不必为每份文档写章节模板。使用 `AdaptiveSourceDocxCompletionApplication`：
+
+1. 读取上传 `.doc` 或 `.docx` 的 Word 标题层级、段落、表头和已有数据。无语义标题时把全文视作一个模块。
+2. 对每个模块先让模型从业务事实的一级字段中选择相关数据，再分别请求补正文或补表格，
+   防止整份事实被写到同一个章节。同一模块可先填表，再为未被表格覆盖的事实补正文；
+   图表单独规划。
+3. 正文只插入新段落或替换明确的“待补充”文本；表格只填写空格和追加有来源的行。
+   图表插入为 Word 原生可编辑图表；单一图表标题和单一可核验数值序列同时存在时，
+   可纠正小模型误报的“缺少图表数据”。
+4. 校验源文件 SHA-256、锚点、表格行宽与业务值、数字来源后，先返回 `DocumentCompletionPlan`
+   供审核，确认后才写入新 DOCX；上传原件保持不变。
+
+“能补充的内容补充一下”属于尽力补全：某一模块缺资料或表格结构不安全时，在计划的 `reason`
+中记录跳过原因，不阻断其它有依据的段落；明确要求必须完成某个缺资料模块时才返回
+`NEEDS_INPUT`。任何自动生成的叙述仍应由业务人员审核语义，不应将结构校验等同于事实审签。
+
+```java
+StructuredAiClient model = new OllamaStructuredAiClient("qwen3.5:2b");
+AdaptiveSourceDocxCompletionApplication app =
+        new AdaptiveSourceDocxCompletionApplication(model);
+JsonNode facts = new ObjectMapper().readTree("{\"project\":{\"name\":\"订单平台\"},"
+        + "\"risks\":[{\"name\":\"接口超时\",\"count\":3},"
+        + "{\"name\":\"资源告警\",\"count\":2}]}");
+DocumentCompletionPlan plan = app.plan(sourceDocx,
+        "按照业务数据，把文章中能够补充的正文、表格和图表补充完整；保留现有内容", facts);
+// 在应用/服务层展示 plan 的目标位置与新内容，取得审核结果后再写入。
+if (plan.isReady()) app.apply(sourceDocx, outputDocx, plan);
+```
+
+`sourceDocx` 可以指向旧版二进制 `.doc`；计划绑定原始文件的 SHA-256，输出始终是新的
+`.docx`，不会覆盖源文件。Java 的 `SourceDocxUploadStore` 也可上传 `.doc`。该格式必须是真实的
+Word 二进制文件，且未加密、不含宏；仅把其他文件改名为 `.doc` 会被拒绝。HTTP 上传
+同样支持 `.doc`，请求时使用 `Content-Type: application/msword`。
+
+真实本地模型测试见
+[`AdaptiveSourceDocxOllamaLiveTest`](../src/test/java/cn/bugstack/application/completion/AdaptiveSourceDocxOllamaLiveTest.java)：
+
+```bash
+JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-11.0.17.jdk/Contents/Home \
+  /Users/luojiang/maven/apache-maven-3.6.3/bin/mvn \
+  -Dmaven.repo.local=/Users/luojiang/maven/repository \
+  -Dtest=AdaptiveSourceDocxOllamaLiveTest -Dollama.adaptive.live=true test
+```
+
+示例输出在 `target/adaptive-source-ollama/completed.docx`，审核计划在同目录的
+`review-plan.json`。这条自适应入口目前是 Java API，不等同于下面已有的 MCP
+`omni_source_docx_plan`（后者仍使用原有规划器）。合并/嵌套/复杂表格、事实分组不明确、
+多个候选图表序列等情况应进入人工审核或补充输入；不能承诺任意文章都无需审核自动完成。
 
 ## 当前已落地的闭环
 
@@ -20,8 +72,8 @@
 
 当前版本具备：
 
-- 只接受 `.docx`；Java 本地入口最大 100 MiB，当前 HTTP 上传入口最大 25 MiB。
-- Aspose 加载前检查 OOXML ZIP 的必需部件、路径穿越、重复条目、解压规模及危险外部关系。
+- Java 本地入口接受 `.doc` 与 `.docx`，最大 100 MiB；HTTP 上传入口也接受两者，最大 25 MiB。
+- Aspose 加载前对 `.docx` 检查 OOXML ZIP 的必需部件、路径穿越、重复条目、解压规模及危险外部关系；对 `.doc` 校验复合文件签名、真实 Word 格式、加密和宏标志。
 - 提取正文直接段落的 Section/位置/样式，以及表格题注、表头、数据行、Section 序号和表格 ID。
 - 同一份计划可定位多个段落和多个表格。段落支持替换文本和在锚点后插入新段落。
 - 多 Run 段落可按 `runIndex` 和原文前置条件精确替换一个文本片段，保留其他片段的颜色、加粗等样式。
@@ -52,8 +104,9 @@
 服务配置 `OMNI_OFFICE_OLLAMA_MODEL`（例如 `qwen3.5:2b`）后，提供以下入口。未配置结构化 AI
 客户端时，不公布这三个补全工具，HTTP 上传返回 `503`。
 
-1. 已认证调用方使用 `POST /v1/source-documents` 上传原始 DOCX 字节；请求
+1. 已认证调用方使用 `POST /v1/source-documents` 上传原始 Word 字节；`.docx` 请求使用
    `Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document`，
+   `.doc` 请求使用 `Content-Type: application/msword`。两种格式均须通过真实格式校验，
    需要 `source-docx:upload` 权限。响应返回 `sourceArtifactId`、`resourceUri` 和 `sha256`。
    上传与输出工件按租户和主体隔离；原始文件不会被改动。
 2. 调用 MCP 或 Function 工具 `omni_source_docx_analyze`，以 `sourceArtifactId` 获取段落、
@@ -93,8 +146,8 @@
 
 `SourceDocxUploadStore` 是可选的本地存储组件，适用于嵌入式 Java 使用；它与上述租户 HTTP
 工件库是两种入口，ID 不能混用。服务层应先完成用户认证，再传入可信的 `ownerId`。
-本地源文件限制为 `.docx` 且不超过 100 MiB；压缩后体积符合限制但解压超过
-300 MiB、或包含非普通超链接外部关系的文件也会被拒绝。
+本地源文件可为 `.doc` 或 `.docx`，且不超过 100 MiB。`.docx` 压缩后体积符合限制但解压超过
+300 MiB、或包含非普通超链接外部关系的文件会被拒绝；`.doc` 必须是真实且未加密、无宏的 Word 二进制文件。
 
 ```java
 SourceDocxUploadStore uploads = new SourceDocxUploadStore(uploadRoot);

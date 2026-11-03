@@ -127,6 +127,8 @@ public final class DefaultDocumentSpecCompiler implements DocumentSpecCompiler {
     private ReportChart compileChart(ChartBlockSpec source) {
         ReportChart target = new ReportChart();
         target.setChartType(ReportChartType.valueOf(source.getChartType()));
+        target.setStylePreset(source.getStylePreset());
+        target.setRenderMode(source.getRenderMode());
         target.setTitle(source.getTitle());
         target.setCategories(source.getCategories());
         List<ReportChartSeries> series = new ArrayList<>();

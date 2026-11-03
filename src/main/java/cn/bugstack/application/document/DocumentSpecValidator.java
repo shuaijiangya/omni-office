@@ -50,6 +50,10 @@ public final class DocumentSpecValidator {
             "COLUMN", "BAR", "PIE", "LINE", "RADAR"));
     private static final Set<String> CHART_LEGEND_POSITIONS = new HashSet<>(Arrays.asList(
             "BOTTOM", "TOP", "LEFT", "RIGHT"));
+    private static final Set<String> CHART_STYLE_PRESETS = new HashSet<>(Arrays.asList(
+            "DEFAULT", "BUSINESS_BLUE", "MONOCHROME"));
+    private static final Set<String> CHART_RENDER_MODES = new HashSet<>(Arrays.asList(
+            "NATIVE_WORD", "ECHARTS_IMAGE"));
 
     private final DocumentSpecLimits limits;
     private final boolean diagramEnabled;
@@ -516,6 +520,10 @@ public final class DocumentSpecValidator {
     private void validateChart(ChartBlockSpec chart, String path, ValidationState state) {
         validateEnum(chart.getChartType(), CHART_TYPES, path + "/chartType",
                 "chartType must be COLUMN, BAR, PIE, LINE or RADAR", state);
+        validateEnum(chart.getStylePreset(), CHART_STYLE_PRESETS, path + "/stylePreset",
+                "stylePreset must be DEFAULT, BUSINESS_BLUE or MONOCHROME", state);
+        validateEnum(chart.getRenderMode(), CHART_RENDER_MODES, path + "/renderMode",
+                "renderMode must be NATIVE_WORD or ECHARTS_IMAGE", state);
         validateEnum(chart.getLegendPosition(), CHART_LEGEND_POSITIONS, path + "/legendPosition",
                 "legendPosition must be BOTTOM, TOP, LEFT or RIGHT", state);
         validateEnum(chart.getCaptionPosition(), CAPTION_POSITIONS, path + "/captionPosition",

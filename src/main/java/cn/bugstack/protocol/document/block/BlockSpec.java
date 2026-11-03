@@ -19,4 +19,14 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
         @JsonSubTypes.Type(value = PageBreakBlockSpec.class, name = "pageBreak")
 })
 public abstract class BlockSpec {
+    private String slotId;
+
+    /** 上传模板中的填充位置；普通 DocumentSpec 可不设置。 */
+    public String getSlotId() {
+        return slotId;
+    }
+
+    public void setSlotId(String slotId) {
+        this.slotId = slotId;
+    }
 }

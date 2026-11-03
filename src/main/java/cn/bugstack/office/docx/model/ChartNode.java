@@ -7,6 +7,8 @@ import java.util.List;
 /** 可渲染为 Word 原生可编辑图表的块级节点。 */
 public final class ChartNode implements DocxBlock {
     private ChartType chartType = ChartType.COLUMN;
+    private ChartStylePreset stylePreset = ChartStylePreset.DEFAULT;
+    private ChartRenderMode renderMode = ChartRenderMode.NATIVE_WORD;
     private String title;
     private final List<String> categories = new ArrayList<>();
     private final List<ChartSeriesNode> series = new ArrayList<>();
@@ -21,6 +23,10 @@ public final class ChartNode implements DocxBlock {
 
     /** @return 图表类型 */ public ChartType getChartType() { return chartType; }
     /** @param chartType 图表类型 */ public void setChartType(ChartType chartType) { this.chartType = chartType; }
+    /** @return 图表视觉预设 */ public ChartStylePreset getStylePreset() { return stylePreset; }
+    /** @param stylePreset 图表视觉预设 */ public void setStylePreset(ChartStylePreset stylePreset) { this.stylePreset = stylePreset; }
+    /** @return 图表输出方式 */ public ChartRenderMode getRenderMode() { return renderMode; }
+    /** @param renderMode 图表输出方式 */ public void setRenderMode(ChartRenderMode renderMode) { this.renderMode = renderMode; }
     /** @return 标题 */ public String getTitle() { return title; }
     /** @param title 标题 */ public void setTitle(String title) { this.title = title; }
     /** @return 分类标签 */ public List<String> getCategories() { return Collections.unmodifiableList(categories); }

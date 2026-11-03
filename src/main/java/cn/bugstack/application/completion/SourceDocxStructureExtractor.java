@@ -4,6 +4,9 @@ import cn.bugstack.office.docx.render.AsposeWordsLicenseLoader;
 import com.aspose.words.Cell;
 import com.aspose.words.CellMerge;
 import com.aspose.words.Document;
+import com.aspose.words.FileFormatInfo;
+import com.aspose.words.FileFormatUtil;
+import com.aspose.words.LoadFormat;
 import com.aspose.words.Node;
 import com.aspose.words.NodeCollection;
 import com.aspose.words.NodeType;
@@ -14,32 +17,38 @@ import com.aspose.words.Section;
 import com.aspose.words.Table;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * 从上传 DOCX 中提取供模板识别和 AI 规划使用的安全结构快照。
+ * 从上传的 .doc 或 .docx 中提取供 AI 规划使用的安全结构快照。
  */
 public final class SourceDocxStructureExtractor {
 
     private static final long MAX_SOURCE_BYTES = 100L * 1024L * 1024L;
+    private static final byte[] COMPOUND_FILE_SIGNATURE = {
+            (byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0,
+            (byte) 0xA1, (byte) 0xB1, 0x1A, (byte) 0xE1};
 
     /**
-     * 提取 DOCX 正文段落与表格结构。
+     * 提取 Word 正文段落与表格结构。
      *
-     * @param source DOCX 文件
+     * @param source .doc 或 .docx 文件
      * @return 文档结构快照
      */
     public DocumentStructureSnapshot extract(Path source) {
         validateSource(source);
-        new SourceDocxPackageValidator().validate(source);
+        if (isLegacyDoc(source)) validateLegacyDoc(source);
+        else new SourceDocxPackageValidator().validate(source);
         try {
             AsposeWordsLicenseLoader.applyConfiguredLicense();
             Document document = new Document(source.toString());
@@ -127,9 +136,33 @@ public final class SourceDocxStructureExtractor {
             throw new IllegalArgumentException("failed to inspect source DOCX", e);
         }
         String name = source.getFileName().toString().toLowerCase(Locale.ROOT);
-        if (!name.endsWith(".docx")) {
-            throw new IllegalArgumentException("only .docx source documents are supported");
+        if (!name.endsWith(".docx") && !name.endsWith(".doc")) {
+            throw new IllegalArgumentException("only .doc and .docx source documents are supported");
         }
+    }
+
+    /** 旧版 Word 二进制文件不能按 OOXML ZIP 检查，需验证复合文件签名与真实格式。 */
+    private void validateLegacyDoc(Path source) {
+        try (InputStream input = Files.newInputStream(source)) {
+            if (!Arrays.equals(COMPOUND_FILE_SIGNATURE, input.readNBytes(COMPOUND_FILE_SIGNATURE.length))) {
+                throw new IllegalArgumentException("file is not a binary Word .doc document");
+            }
+            FileFormatInfo format = FileFormatUtil.detectFileFormat(source.toString());
+            if (format.getLoadFormat() != LoadFormat.DOC || format.isEncrypted()
+                    || format.hasMacros()) {
+                throw new IllegalArgumentException("only unencrypted, macro-free binary Word .doc is supported");
+            }
+        } catch (IOException e) {
+            throw new IllegalArgumentException("failed to inspect binary Word .doc", e);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("binary Word .doc format cannot be inspected", e);
+        }
+    }
+
+    private boolean isLegacyDoc(Path source) {
+        return source.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".doc");
     }
 
     private List<List<String>> extractGrid(Table table) {
